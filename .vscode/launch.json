@@ -1,0 +1,22 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:WindowSwitcher}",
+            "name": "Debug WindowSwitcher",
+            "program": "${workspaceFolder:WindowSwitcher}/.build/debug/WindowSwitcher",
+            "preLaunchTask": "swift: Build Debug WindowSwitcher"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:WindowSwitcher}",
+            "name": "Release WindowSwitcher",
+            "program": "${workspaceFolder:WindowSwitcher}/.build/release/WindowSwitcher",
+            "preLaunchTask": "swift: Build Release WindowSwitcher"
+        }
+    ]
+}
