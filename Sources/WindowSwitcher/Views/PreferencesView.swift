@@ -123,7 +123,6 @@ struct PreferencesView: View {
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
-
                     }
 
                     Divider()

@@ -170,9 +170,7 @@ class WindowManager: ObservableObject {
         let windowsAttr = kAXWindowsAttribute as CFString
         if AXUIElementCopyAttributeValue(appElement, windowsAttr, &windowsValue) == .success,
            let axWindows = windowsValue as? [AXUIElement] {
-
             var matchedWindow: AXUIElement?
-
             // First pass: Try to match window by position and size (most accurate)
             for axWindow in axWindows {
                 var positionValue: AnyObject?
@@ -184,7 +182,6 @@ class WindowManager: ObservableObject {
                    AXUIElementCopyAttributeValue(axWindow, sizeAttr, &sizeValue) == .success,
                    let position = positionValue as? CGPoint,
                    let size = sizeValue as? CGSize {
-
                     let axBounds = CGRect(origin: position, size: size)
 
                     // Check if bounds match (with small tolerance)
