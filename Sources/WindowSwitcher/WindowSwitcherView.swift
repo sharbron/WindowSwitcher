@@ -243,6 +243,8 @@ struct VisualEffectBlur: NSViewRepresentable {
         if let layer = view.layer {
             layer.cornerRadius = cornerRadius
             layer.masksToBounds = true
+            layer.cornerCurve = .continuous // Smoother, more natural corners
+            layer.allowsEdgeAntialiasing = true // Enable anti-aliasing for smooth edges
         }
 
         return view
@@ -256,6 +258,8 @@ struct VisualEffectBlur: NSViewRepresentable {
         if let layer = nsView.layer {
             layer.cornerRadius = cornerRadius
             layer.masksToBounds = true
+            layer.cornerCurve = .continuous
+            layer.allowsEdgeAntialiasing = true
         }
     }
 }
