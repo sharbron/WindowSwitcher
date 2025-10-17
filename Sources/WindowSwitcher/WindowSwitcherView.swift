@@ -45,8 +45,9 @@ struct WindowSwitcherView: View {
             .frame(maxWidth: maxSwitcherWidth)
             .background(
                 VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow, cornerRadius: 20)
-                    .shadow(color: .black.opacity(0.5), radius: 30, x: 0, y: 15)
             )
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+            .shadow(color: .black.opacity(0.5), radius: 30, x: 0, y: 15)
             .onChange(of: selectedIndex) { newIndex in
                 if newIndex < displayWindows.count {
                     withAnimation(.easeInOut(duration: 0.2)) {
