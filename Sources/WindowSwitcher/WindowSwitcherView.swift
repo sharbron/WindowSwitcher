@@ -44,10 +44,10 @@ struct WindowSwitcherView: View {
             }
             .frame(maxWidth: maxSwitcherWidth)
             .background(
-                VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow, cornerRadius: 20)
+                VisualEffectBlur(material: .popover, blendingMode: .behindWindow, cornerRadius: 20)
             )
             .clipShape(RoundedRectangle(cornerRadius: 20))
-            .shadow(color: .black.opacity(0.5), radius: 30, x: 0, y: 15)
+            .shadow(color: .black.opacity(0.3), radius: 20, x: 0, y: 10)
             .onChange(of: selectedIndex) { newIndex in
                 if newIndex < displayWindows.count {
                     withAnimation(.easeInOut(duration: 0.2)) {
@@ -200,6 +200,13 @@ class SwitcherWindow: NSWindow {
         self.collectionBehavior = [.canJoinAllSpaces, .stationary]
         self.isMovableByWindowBackground = false
         self.ignoresMouseEvents = false
+        self.hasShadow = false // Disable window shadow - we use view-level shadow instead
+
+        // Ensure the content view is transparent
+        if let contentView = self.contentView {
+            contentView.wantsLayer = true
+            contentView.layer?.backgroundColor = NSColor.clear.cgColor
+        }
     }
 
     /// Centers the window on the main screen, both horizontally and vertically
