@@ -22,29 +22,44 @@ struct WindowSwitcherView: View {
     }
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 40) {
-                ForEach(Array(displayWindows.enumerated()), id: \.element.id) { index, window in
-                    WindowThumbnailView(
-                        window: window,
-                        isSelected: index == selectedIndex,
-                        thumbnailWidth: thumbnailWidth,
-                        thumbnailHeight: thumbnailHeight,
-                        windowNumber: getWindowNumber(for: window, at: index)
-                    )
-                    .onTapGesture {
-                        onSelect(window)
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 20) {
+                    ForEach(Array(displayWindows.enumerated()), id: \.element.id) { index, window in
+                        WindowThumbnailView(
+                            window: window,
+                            isSelected: index == selectedIndex,
+                            thumbnailWidth: thumbnailWidth,
+                            thumbnailHeight: thumbnailHeight,
+                            windowNumber: getWindowNumber(for: window, at: index)
+                        )
+                        .id(window.id)
+                        .onTapGesture {
+                            onSelect(window)
+                        }
+                    }
+                }
+                .padding(32)
+            }
+            .frame(maxWidth: maxSwitcherWidth)
+            .background(
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(Color(NSColor.windowBackgroundColor).opacity(0.95))
+                    .shadow(color: .black.opacity(0.4), radius: 30, x: 0, y: 15)
+            )
+            .onChange(of: selectedIndex) { newIndex in
+                if newIndex < displayWindows.count {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        proxy.scrollTo(displayWindows[newIndex].id, anchor: .center)
                     }
                 }
             }
-            .padding(40)
+            .onAppear {
+                if selectedIndex < displayWindows.count {
+                    proxy.scrollTo(displayWindows[selectedIndex].id, anchor: .center)
+                }
+            }
         }
-        .frame(maxWidth: maxSwitcherWidth)
-        .background(
-            RoundedRectangle(cornerRadius: 20)
-                .fill(Color(NSColor.windowBackgroundColor).opacity(0.95))
-                .shadow(color: .black.opacity(0.4), radius: 30, x: 0, y: 15)
-        )
     }
 
     private var maxSwitcherWidth: CGFloat {
