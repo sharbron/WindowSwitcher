@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct WindowSwitcherView: View {
     let windows: [WindowInfo]
@@ -43,9 +44,9 @@ struct WindowSwitcherView: View {
             }
             .frame(maxWidth: maxSwitcherWidth)
             .background(
-                RoundedRectangle(cornerRadius: 20)
-                    .fill(Color(NSColor.windowBackgroundColor).opacity(0.95))
-                    .shadow(color: .black.opacity(0.4), radius: 30, x: 0, y: 15)
+                VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow)
+                    .cornerRadius(20)
+                    .shadow(color: .black.opacity(0.5), radius: 30, x: 0, y: 15)
             )
             .onChange(of: selectedIndex) { newIndex in
                 if newIndex < displayWindows.count {
@@ -215,5 +216,24 @@ class SwitcherWindow: NSWindow {
         let y = screenFrame.origin.y + (screenFrame.height - windowFrame.height) / 2
 
         setFrameOrigin(NSPoint(x: x, y: y))
+    }
+}
+
+/// Native macOS visual effect blur view wrapper
+struct VisualEffectBlur: NSViewRepresentable {
+    var material: NSVisualEffectView.Material
+    var blendingMode: NSVisualEffectView.BlendingMode
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = material
+        view.blendingMode = blendingMode
+        view.state = .active
+        return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
+        nsView.material = material
+        nsView.blendingMode = blendingMode
     }
 }
