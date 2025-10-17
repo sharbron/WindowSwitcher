@@ -44,8 +44,7 @@ struct WindowSwitcherView: View {
             }
             .frame(maxWidth: maxSwitcherWidth)
             .background(
-                VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow)
-                    .cornerRadius(20)
+                VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow, cornerRadius: 20)
                     .shadow(color: .black.opacity(0.5), radius: 30, x: 0, y: 15)
             )
             .onChange(of: selectedIndex) { newIndex in
@@ -223,17 +222,32 @@ class SwitcherWindow: NSWindow {
 struct VisualEffectBlur: NSViewRepresentable {
     var material: NSVisualEffectView.Material
     var blendingMode: NSVisualEffectView.BlendingMode
+    var cornerRadius: CGFloat = 0
 
     func makeNSView(context: Context) -> NSVisualEffectView {
         let view = NSVisualEffectView()
         view.material = material
         view.blendingMode = blendingMode
         view.state = .active
+        view.wantsLayer = true
+
+        // Configure layer for proper corner radius clipping
+        if let layer = view.layer {
+            layer.cornerRadius = cornerRadius
+            layer.masksToBounds = true
+        }
+
         return view
     }
 
     func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
         nsView.material = material
         nsView.blendingMode = blendingMode
+
+        // Update corner radius if changed
+        if let layer = nsView.layer {
+            layer.cornerRadius = cornerRadius
+            layer.masksToBounds = true
+        }
     }
 }
