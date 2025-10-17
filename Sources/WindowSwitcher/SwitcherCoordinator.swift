@@ -71,11 +71,9 @@ class SwitcherCoordinator: ObservableObject {
         // Create and show switcher window
         displaySwitcherWindow()
 
-        // Capture fresh thumbnails only for windows without cached thumbnails
+        // Capture fresh thumbnails for all windows when switcher opens
+        // This ensures previews are always up-to-date
         for (index, window) in updatedWindows.enumerated() {
-            // Skip if window already has a cached thumbnail
-            guard window.thumbnail == nil else { continue }
-
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 guard let self = self else { return }
 
@@ -86,7 +84,7 @@ class SwitcherCoordinator: ObservableObject {
                               index < self.windows.count,
                               self.windows[index].id == window.id else { return }
 
-                        // Update just this window's thumbnail
+                        // Update with fresh thumbnail
                         self.windows[index].thumbnail = thumbnail
                     }
                 }

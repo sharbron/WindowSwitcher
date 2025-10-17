@@ -65,14 +65,15 @@ class WindowManager: ObservableObject {
     }
 
     private func startCacheRefresh() {
-        // Start refreshing after a 2 second delay to avoid blocking startup
-        cacheRefreshTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+        // Start refreshing frequently for up-to-date previews (every 0.5 seconds)
+        cacheRefreshTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             self?.refreshThumbnailCache()
         }
     }
 
     private func refreshThumbnailCache() {
-        DispatchQueue.global(qos: .utility).async { [weak self] in
+        // Use higher priority queue for faster, more responsive updates
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
 
             // Get current window list (only on-screen windows)
