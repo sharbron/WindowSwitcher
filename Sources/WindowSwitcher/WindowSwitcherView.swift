@@ -199,8 +199,21 @@ class SwitcherWindow: NSWindow {
         self.collectionBehavior = [.canJoinAllSpaces, .stationary]
         self.isMovableByWindowBackground = false
         self.ignoresMouseEvents = false
+    }
 
-        // Center on screen
-        self.center()
+    /// Centers the window on the main screen, both horizontally and vertically
+    func centerOnScreen() {
+        guard let screen = NSScreen.main else {
+            center() // Fallback to default centering
+            return
+        }
+
+        let screenFrame = screen.visibleFrame
+        let windowFrame = frame
+
+        let x = screenFrame.origin.x + (screenFrame.width - windowFrame.width) / 2
+        let y = screenFrame.origin.y + (screenFrame.height - windowFrame.height) / 2
+
+        setFrameOrigin(NSPoint(x: x, y: y))
     }
 }

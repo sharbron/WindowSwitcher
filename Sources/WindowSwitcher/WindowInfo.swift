@@ -25,9 +25,39 @@ class WindowManager: ObservableObject {
     private var thumbnailCache: [CGWindowID: NSImage] = [:]
     private var cacheRefreshTimer: Timer?
 
+    // Track window activation order for recency sorting
+    private var windowActivationOrder: [CGWindowID] = []
+    private let maxActivationHistorySize = 50
+
     init() {
         // Start background cache refresh timer (every 2 seconds)
         startCacheRefresh()
+        loadActivationHistory()
+    }
+
+    private func loadActivationHistory() {
+        // Load previously saved activation order
+        if let saved = UserDefaults.standard.array(forKey: "windowActivationOrder") as? [UInt32] {
+            windowActivationOrder = saved.map { CGWindowID($0) }
+        }
+    }
+
+    private func saveActivationHistory() {
+        // Save activation order for persistence across app restarts
+        let orderToSave = windowActivationOrder.map { UInt32($0) }
+        UserDefaults.standard.set(orderToSave, forKey: "windowActivationOrder")
+    }
+
+    func recordWindowActivation(_ windowID: CGWindowID) {
+        // Remove if already in list
+        windowActivationOrder.removeAll { $0 == windowID }
+        // Add to front (most recent)
+        windowActivationOrder.insert(windowID, at: 0)
+        // Keep list size manageable
+        if windowActivationOrder.count > maxActivationHistorySize {
+            windowActivationOrder = Array(windowActivationOrder.prefix(maxActivationHistorySize))
+        }
+        saveActivationHistory()
     }
 
     deinit {
@@ -91,9 +121,17 @@ class WindowManager: ObservableObject {
         // Get visible windows via CoreGraphics
         var windowList = getWindowsViaCoreGraphics()
 
-        // Sort windows: prioritize windows with titles, then by app name
+        // Sort windows by recency (most recently activated first)
         windowList.sort { lhs, rhs in
-            // Windows with titles come first
+            let lhsIndex = windowActivationOrder.firstIndex(of: lhs.id) ?? Int.max
+            let rhsIndex = windowActivationOrder.firstIndex(of: rhs.id) ?? Int.max
+
+            // Lower index = more recent (comes first)
+            if lhsIndex != rhsIndex {
+                return lhsIndex < rhsIndex
+            }
+
+            // If neither has activation history, prioritize windows with titles
             let lhsHasTitle = !lhs.title.isEmpty
             let rhsHasTitle = !rhs.title.isEmpty
 
@@ -101,7 +139,7 @@ class WindowManager: ObservableObject {
                 return lhsHasTitle
             }
 
-            // Then sort by app name
+            // Finally sort by app name
             return lhs.appName.localizedCaseInsensitiveCompare(rhs.appName) == .orderedAscending
         }
 
@@ -175,6 +213,9 @@ class WindowManager: ObservableObject {
 
     func activateWindow(_ window: WindowInfo) {
         logger.info("Attempting to activate window: \(window.title) from app: \(window.appName)")
+
+        // Record this activation for recency tracking
+        recordWindowActivation(window.id)
 
         // Get the application
         guard let app = NSRunningApplication(processIdentifier: window.ownerPID) else {

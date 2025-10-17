@@ -117,8 +117,12 @@ class SwitcherCoordinator: ObservableObject {
         let contentSize = hostingController.view.fittingSize
         window.setContentSize(contentSize)
 
-        // Always center the window
-        window.center()
+        // Center the window on screen (both horizontally and vertically)
+        if let switcherWindow = window as? SwitcherWindow {
+            switcherWindow.centerOnScreen()
+        } else {
+            window.center()
+        }
 
         window.makeKeyAndOrderFront(nil)
     }
@@ -153,7 +157,13 @@ class SwitcherCoordinator: ObservableObject {
         // Re-center after content update
         let contentSize = hostingController.view.fittingSize
         window.setContentSize(contentSize)
-        window.center()
+
+        // Center the window on screen (both horizontally and vertically)
+        if let switcherWindow = window as? SwitcherWindow {
+            switcherWindow.centerOnScreen()
+        } else {
+            window.center()
+        }
     }
 
     private func activateSelectedWindow() {
