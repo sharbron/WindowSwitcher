@@ -75,46 +75,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func checkAccessibilityPermissions() {
-        // Check if we have accessibility permissions
+        // Request permissions - macOS will show its own prompt
         let options: NSDictionary = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
-        let hasPermission = AXIsProcessTrustedWithOptions(options)
-
-        if !hasPermission {
-            // Show a helpful alert after a short delay to let the system prompt appear first
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-                self?.showPermissionAlert()
-            }
-        }
-    }
-
-    private func showPermissionAlert() {
-        let alert = NSAlert()
-        alert.messageText = "Accessibility Permission Required"
-        alert.informativeText = """
-        Window Switcher needs Accessibility permissions to monitor keyboard shortcuts and control windows.
-
-        Please grant permission in System Settings > Privacy & Security > Accessibility.
-
-        The app will work once you grant permission and restart it.
-        """
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Open System Settings")
-        alert.addButton(withTitle: "Quit")
-        alert.addButton(withTitle: "Remind Me Later")
-
-        let response = alert.runModal()
-
-        switch response {
-        case .alertFirstButtonReturn:
-            // Open System Settings
-            let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
-            NSWorkspace.shared.open(url)
-        case .alertSecondButtonReturn:
-            // Quit
-            NSApplication.shared.terminate(nil)
-        default:
-            // Remind Me Later - do nothing
-            break
-        }
+        _ = AXIsProcessTrustedWithOptions(options)
     }
 }

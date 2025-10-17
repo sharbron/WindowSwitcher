@@ -24,62 +24,10 @@ class WindowManager: ObservableObject {
     // Thumbnail cache for instant display
     private var thumbnailCache: [CGWindowID: NSImage] = [:]
     private var cacheRefreshTimer: Timer?
-    private var hasShownScreenRecordingWarning = false
 
     init() {
         // Start background cache refresh timer (every 2 seconds)
         startCacheRefresh()
-        checkScreenRecordingPermission()
-    }
-
-    private func checkScreenRecordingPermission() {
-        // Try to capture a test window to check if we have Screen Recording permission
-        let options: CGWindowListOption = [.excludeDesktopElements, .optionOnScreenOnly]
-        if let windowList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]],
-           let firstWindow = windowList.first,
-           let windowID = firstWindow[kCGWindowNumber as String] as? CGWindowID {
-            let testImage = CGWindowListCreateImage(
-                .null,
-                .optionIncludingWindow,
-                windowID,
-                [.bestResolution, .boundsIgnoreFraming]
-            )
-
-            if testImage == nil && !hasShownScreenRecordingWarning {
-                hasShownScreenRecordingWarning = true
-                logger.warning("Screen Recording permission not granted - will use app icons instead of previews")
-                showScreenRecordingWarning()
-            }
-        }
-    }
-
-    private func showScreenRecordingWarning() {
-        DispatchQueue.main.async {
-            let alert = NSAlert()
-            alert.messageText = "Screen Recording Permission Recommended"
-            alert.informativeText = """
-            Window Switcher can show live window previews if you grant Screen Recording permission.
-
-            Without this permission, app icons will be shown instead.
-
-            You can enable this in System Settings > Privacy & Security > Screen Recording.
-            """
-            alert.alertStyle = .informational
-            alert.addButton(withTitle: "Open System Settings")
-            alert.addButton(withTitle: "Use App Icons")
-
-            let response = alert.runModal()
-
-            if response == .alertFirstButtonReturn {
-                let url = URL(
-                    string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
-                )!
-                NSWorkspace.shared.open(url)
-            } else {
-                // User chose to use app icons
-                UserDefaults.standard.set(true, forKey: "useAppIcons")
-            }
-        }
     }
 
     deinit {

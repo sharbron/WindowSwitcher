@@ -18,7 +18,6 @@ class KeyboardMonitor: ObservableObject {
     var onCmdReleased: (() -> Void)?
     var onShiftTabPressed: (() -> Void)?
     var onEscapePressed: (() -> Void)?
-    var onMonitoringFailed: (() -> Void)?
 
     func startMonitoring() {
         // Create event tap
@@ -39,10 +38,6 @@ class KeyboardMonitor: ObservableObject {
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else {
             logger.error("Failed to create event tap. Check Accessibility permissions.")
-            // Notify that monitoring failed
-            DispatchQueue.main.async { [weak self] in
-                self?.onMonitoringFailed?()
-            }
             return
         }
 

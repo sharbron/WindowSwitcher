@@ -37,10 +37,6 @@ class SwitcherCoordinator: ObservableObject {
             self?.hideSwitcher()
         }
 
-        keyboardMonitor.onMonitoringFailed = { [weak self] in
-            self?.showMonitoringFailedAlert()
-        }
-
         keyboardMonitor.startMonitoring()
     }
 
@@ -180,31 +176,6 @@ class SwitcherCoordinator: ObservableObject {
         isShowingSwitcher = false
         keyboardMonitor.isShowingSwitcher = false
         switcherWindow?.orderOut(nil)
-    }
-
-    private func showMonitoringFailedAlert() {
-        logger.error("Keyboard monitoring failed - showing alert to user")
-
-        let alert = NSAlert()
-        alert.messageText = "Keyboard Monitoring Failed"
-        alert.informativeText = """
-        Window Switcher could not start keyboard monitoring. This is usually because:
-
-        1. Accessibility permissions were not granted
-        2. The app needs to be restarted after granting permissions
-
-        Please check System Settings > Privacy & Security > Accessibility and ensure Window Switcher is enabled.
-        """
-        alert.alertStyle = .critical
-        alert.addButton(withTitle: "Open System Settings")
-        alert.addButton(withTitle: "OK")
-
-        let response = alert.runModal()
-
-        if response == .alertFirstButtonReturn {
-            let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
-            NSWorkspace.shared.open(url)
-        }
     }
 
     deinit {
