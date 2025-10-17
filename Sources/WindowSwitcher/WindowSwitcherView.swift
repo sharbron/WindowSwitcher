@@ -189,7 +189,7 @@ class SwitcherWindow: NSWindow {
     init() {
         super.init(
             contentRect: NSRect(x: 0, y: 0, width: 800, height: 400),
-            styleMask: [.borderless],
+            styleMask: [.borderless, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
@@ -201,11 +201,15 @@ class SwitcherWindow: NSWindow {
         self.isMovableByWindowBackground = false
         self.ignoresMouseEvents = false
         self.hasShadow = false // Disable window shadow - we use view-level shadow instead
+        self.titlebarAppearsTransparent = true
 
-        // Ensure the content view is transparent
+        // Ensure the content view is transparent and uses rounded corners
         if let contentView = self.contentView {
             contentView.wantsLayer = true
             contentView.layer?.backgroundColor = NSColor.clear.cgColor
+            contentView.layer?.cornerRadius = 20
+            contentView.layer?.cornerCurve = .continuous
+            contentView.layer?.masksToBounds = true
         }
     }
 
