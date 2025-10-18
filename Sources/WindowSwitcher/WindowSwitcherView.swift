@@ -43,21 +43,19 @@ struct WindowSwitcherView: View {
                 .padding(32)
             }
             .frame(maxWidth: maxSwitcherWidth)
+            .padding(2) // Add padding to inset blur from edges
             .background(
-                ZStack {
-                    // Use a solid color base to prevent any transparency issues
-                    RoundedRectangle(cornerRadius: 20)
-                        .fill(Color(NSColor.windowBackgroundColor).opacity(0.1))
-
-                    VisualEffectBlur(material: .menu, blendingMode: .withinWindow, cornerRadius: 20)
-                }
+                VisualEffectBlur(material: .menu, blendingMode: .withinWindow, cornerRadius: 22)
+                    .padding(-2) // Extend blur to fill
             )
-            .clipShape(RoundedRectangle(cornerRadius: 20))
-            .overlay(
-                RoundedRectangle(cornerRadius: 20)
-                    .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
+            .background(
+                RoundedRectangle(cornerRadius: 22)
+                    .fill(Color(NSColor.controlBackgroundColor).opacity(0.5))
+                    .padding(-2)
             )
+            .clipShape(RoundedRectangle(cornerRadius: 22))
             .shadow(color: .black.opacity(0.3), radius: 20, x: 0, y: 10)
+            .padding(-2) // Remove the visual padding from content
             .onChange(of: selectedIndex) { newIndex in
                 if newIndex < displayWindows.count {
                     withAnimation(.easeInOut(duration: 0.2)) {
