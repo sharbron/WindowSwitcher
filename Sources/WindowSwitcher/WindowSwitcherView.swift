@@ -44,9 +44,19 @@ struct WindowSwitcherView: View {
             }
             .frame(maxWidth: maxSwitcherWidth)
             .background(
-                VisualEffectBlur(material: .popover, blendingMode: .behindWindow, cornerRadius: 20)
+                ZStack {
+                    // Use a solid color base to prevent any transparency issues
+                    RoundedRectangle(cornerRadius: 20)
+                        .fill(Color(NSColor.windowBackgroundColor).opacity(0.1))
+
+                    VisualEffectBlur(material: .menu, blendingMode: .withinWindow, cornerRadius: 20)
+                }
             )
             .clipShape(RoundedRectangle(cornerRadius: 20))
+            .overlay(
+                RoundedRectangle(cornerRadius: 20)
+                    .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
+            )
             .shadow(color: .black.opacity(0.3), radius: 20, x: 0, y: 10)
             .onChange(of: selectedIndex) { newIndex in
                 if newIndex < displayWindows.count {
