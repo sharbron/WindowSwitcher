@@ -8,17 +8,14 @@ A native macOS utility that brings Windows-style window switching to Mac - switc
 
 ## Features
 
-- **Window-Level Switching** - See and switch between all open windows, not just applications
-- **Live Previews** - Visual thumbnails of each window for easy identification
-- **Native Cmd+Tab Override** - Seamlessly replaces the default macOS app switcher
-- **Keyboard Navigation**:
-  - `Cmd+Tab` - Show switcher and select next window
-  - `Cmd+Shift+Tab` - Select previous window
-  - `Esc` - Cancel and close switcher
-  - Release `Cmd` - Activate selected window
-- **Menu Bar Integration** - Runs quietly in the menu bar with preferences access
-- **Customizable Settings** - Adjust thumbnail size, animation speed, and behavior
-- **Lightweight** - Native performance with minimal resource usage
+- 🪟 **Window-Level Switching** - See and switch between all open windows, not just applications
+- 🖼️ **Live Previews** - Visual thumbnails of each window for easy identification
+- ⌨️ **Native Cmd+Tab Override** - Seamlessly replaces the default macOS app switcher
+- 🎯 **Auto-Scroll Navigation** - Selected window stays centered when navigating
+- 🎨 **Smart Window Filtering** - Removes tiny/irrelevant windows, intelligent sorting
+- ⚙️ **Customizable Settings** - Adjust thumbnail size, max windows, and display options
+- 🚀 **Launch at Login** - Optionally start automatically when you log in
+- ⚡ **Lightweight** - Native performance with minimal resource usage (~20MB RAM)
 
 ## Installation
 
@@ -32,9 +29,9 @@ A native macOS utility that brings Windows-style window switching to Mac - switc
    xattr -cr /Applications/WindowSwitcher.app
    ```
 5. Launch from Applications
-6. Grant Accessibility permissions when prompted
+6. Grant Accessibility and Screen Recording permissions when prompted
 
-⚠️ **This app is unsigned.** macOS will block it without the command above.
+⚠️ **This app is unsigned.** macOS will block it without the command above. See [INSTALL.md](INSTALL.md) for detailed instructions and alternatives.
 
 **Why unsigned?** Code signing requires a $99/year Apple Developer account. For an open-source project, the command above is a simple alternative that tells macOS "I trust this app."
 
@@ -50,42 +47,46 @@ A native macOS utility that brings Windows-style window switching to Mac - switc
 
 #### Building
 
-**Option A: Using Build Script (Recommended)**
 ```bash
 cd WindowSwitcher
+swift build -c release
 ./create_app.sh
 ```
+
 This creates `WindowSwitcher.app` ready to install.
 
-**Option B: Using Command Line**
-```bash
-swift build -c release
-```
+## Usage
 
-**Option C: Using Xcode**
-```bash
-open Package.swift
-```
-Then build in Xcode (Cmd+B)
+1. Press `Cmd+Tab` to open the window switcher
+2. Keep holding `Cmd` and press `Tab` to cycle through windows
+3. Press `Shift+Tab` while holding `Cmd` to cycle backwards
+4. Release `Cmd` to activate the selected window
+5. Press `Esc` to cancel without switching
+6. Configure preferences via the menu bar icon
 
-## Setup
+## Permissions
 
-### 1. Grant Accessibility Permissions
+WindowSwitcher requires two macOS permissions:
 
-WindowSwitcher requires Accessibility permissions to:
+### Accessibility (Required)
 - Monitor Cmd+Tab keyboard shortcuts
-- Capture window information and thumbnails
 - Activate and focus windows
+- Navigate window information
 
-When you first launch the app:
-1. macOS will prompt you for Accessibility access
-2. Click "Open System Settings"
-3. In **Privacy & Security > Accessibility**, enable WindowSwitcher
-4. Restart the app
+### Screen Recording (Optional)
+- Capture window previews/thumbnails
+- Falls back to app icons if denied
 
-### 2. Optional: Launch at Login
+macOS will prompt you for these permissions on first launch. Enable them in **System Settings → Privacy & Security**.
 
-Enable in **Preferences > General > Launch at login** to have WindowSwitcher start automatically when you log in.
+## Performance
+
+| Metric | Value |
+|--------|-------|
+| Memory Usage | ~20 MB |
+| Startup Time | <0.1s |
+| App Size | 519 KB |
+| CPU Impact | Minimal |
 
 ## How It Works
 
@@ -107,14 +108,6 @@ WindowSwitcher uses native macOS APIs for efficient window management:
 - SwiftUI for modern, native UI with smooth animations
 - Runs as menu bar app (LSUIElement = true) with no Dock icon
 - Async thumbnail capture for responsive UI
-
-## Usage
-
-1. Press `Cmd+Tab` to open the window switcher
-2. Keep holding `Cmd` and press `Tab` to cycle through windows
-3. Press `Shift+Tab` while holding `Cmd` to cycle backwards
-4. Release `Cmd` to activate the selected window
-5. Click on any window thumbnail to switch to it immediately
 
 ## Development
 
@@ -157,44 +150,22 @@ SwiftLint runs automatically during builds via `create_app.sh`. You can also run
 swiftlint
 ```
 
-### Customization
-
-You can customize WindowSwitcher by:
-
-- **Thumbnail size** - Adjust in Preferences or modify `thumbnailWidth` and `thumbnailHeight` in `WindowSwitcherView.swift`
-- **Window filtering** - Modify the window enumeration logic in `WindowInfo.swift` to include/exclude certain windows
-- **Appearance** - Customize colors, spacing, and styling in `WindowSwitcherView.swift`
-- **Keyboard shortcuts** - Currently hardcoded to Cmd+Tab; can be made configurable in a future update
-
 ## Troubleshooting
 
-### The switcher doesn't appear when pressing Cmd-Tab
-
-- Ensure Accessibility permissions are granted
-- Check that the app is running (menu bar icon should be visible)
+**Switcher doesn't appear when pressing Cmd+Tab?**
+- Ensure Accessibility permission is granted
+- Check that the app is running (menu bar icon visible)
 - Try restarting the app
 
-### Some windows don't appear in the switcher
+**No window previews shown?**
+- Grant Screen Recording permission in System Settings
+- Or enable "Use app icons instead of previews" in Preferences
+- Restart the app after granting permission
 
-- Some system windows and background processes are filtered out by design
-- Windows with `layer != 0` are excluded (menu bars, dock, etc.)
-
-### Window activation doesn't work
-
-- Verify Accessibility permissions are granted
-- Some apps may have special window management that conflicts
-
-## Known Limitations
-
-- Cannot capture thumbnails of some protected system windows
-- Window matching by title may not be perfect for all applications
-- Performance may vary with large numbers of windows (>50)
-
-## Requirements
-
-- macOS 13.0 or later
-- Xcode 15.0 or later
-- Accessibility permissions
+**Some windows are missing?**
+- Windows smaller than 100x100 pixels are filtered out by design
+- System windows and background processes are excluded
+- Increase "Max windows to show" in Preferences
 
 ## Distribution
 
@@ -273,3 +244,7 @@ Built with:
 - SwiftUI - Modern declarative UI framework
 - macOS Accessibility API - Window management
 - Core Graphics - Window thumbnails
+
+---
+
+*Last Updated: 2025-11-06*
