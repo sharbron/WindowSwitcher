@@ -18,6 +18,9 @@ class KeyboardMonitor: ObservableObject {
     var onCmdReleased: (() -> Void)?
     var onShiftTabPressed: (() -> Void)?
     var onEscapePressed: (() -> Void)?
+    var onCharacterTyped: ((String) -> Void)?
+    var onBackspacePressed: (() -> Void)?
+    var onNumberPressed: ((Int) -> Void)?
 
     func startMonitoring() {
         // Create event tap
@@ -123,6 +126,54 @@ class KeyboardMonitor: ObservableObject {
                 }
 
                 return nil // Consume the event
+            }
+
+            // Backspace key (keycode 51) - handle search backspace
+            if keyCode == 51 && isShowingSwitcher && !flags.contains(.maskCommand) {
+                DispatchQueue.main.async {
+                    self.onBackspacePressed?()
+                }
+
+                return nil // Consume the event
+            }
+
+            // Number keys (Cmd+1 through Cmd+9) for direct window access
+            // Keycodes: 18=1, 19=2, 20=3, 21=4, 23=5, 22=6, 26=7, 28=8, 25=9
+            if isShowingSwitcher && flags.contains(.maskCommand) {
+                let numberKeyMap: [Int64: Int] = [
+                    18: 0, // Cmd+1 -> index 0
+                    19: 1, // Cmd+2 -> index 1
+                    20: 2, // Cmd+3 -> index 2
+                    21: 3, // Cmd+4 -> index 3
+                    23: 4, // Cmd+5 -> index 4
+                    22: 5, // Cmd+6 -> index 5
+                    26: 6, // Cmd+7 -> index 6
+                    28: 7, // Cmd+8 -> index 7
+                    25: 8  // Cmd+9 -> index 8
+                ]
+
+                if let windowIndex = numberKeyMap[keyCode] {
+                    DispatchQueue.main.async {
+                        self.onNumberPressed?(windowIndex)
+                    }
+
+                    return nil // Consume the event
+                }
+            }
+
+            // Character typing for search (when switcher is showing, no Cmd key)
+            if isShowingSwitcher && !flags.contains(.maskCommand) {
+                if let characters = event.characters, !characters.isEmpty {
+                    // Filter out control characters
+                    let filtered = characters.filter { $0.isLetter || $0.isNumber || $0.isWhitespace }
+                    if !filtered.isEmpty {
+                        DispatchQueue.main.async {
+                            self.onCharacterTyped?(String(filtered))
+                        }
+
+                        return nil // Consume the event
+                    }
+                }
             }
         }
 

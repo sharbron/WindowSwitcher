@@ -426,4 +426,95 @@ class WindowManager: ObservableObject {
     private func getAppIcon(for window: WindowInfo) -> NSImage? {
         return getAppIconForWindow(window)
     }
+
+    // MARK: - Window Actions
+
+    /// Closes the specified window
+    func closeWindow(_ window: WindowInfo) {
+        logger.info("Closing window: \(window.title) (ID: \(window.id))")
+
+        guard let app = NSRunningApplication(processIdentifier: window.ownerPID) else {
+            logger.error("Failed to get NSRunningApplication for PID: \(window.ownerPID)")
+            return
+        }
+
+        // Find the window using Accessibility API
+        if let axWindow = findAccessibilityWindow(for: window, in: app) {
+            // Get the close button
+            var closeButtonValue: AnyObject?
+            let closeButtonAttr = kAXCloseButtonAttribute as CFString
+
+            if AXUIElementCopyAttributeValue(axWindow, closeButtonAttr, &closeButtonValue) == .success,
+               let closeButton = closeButtonValue as! AXUIElement? {
+                // Press the close button
+                let result = AXUIElementPerformAction(closeButton, kAXPressAction as CFString)
+
+                if result == .success {
+                    logger.info("Successfully closed window: \(window.title)")
+                } else {
+                    logger.warning("Failed to close window: \(window.title), error code: \(result.rawValue)")
+                }
+            } else {
+                logger.warning("Could not find close button for window: \(window.title)")
+            }
+        } else {
+            logger.warning("Could not find accessibility window for: \(window.title)")
+        }
+    }
+
+    /// Minimizes the specified window
+    func minimizeWindow(_ window: WindowInfo) {
+        logger.info("Minimizing window: \(window.title) (ID: \(window.id))")
+
+        guard let app = NSRunningApplication(processIdentifier: window.ownerPID) else {
+            logger.error("Failed to get NSRunningApplication for PID: \(window.ownerPID)")
+            return
+        }
+
+        // Find the window using Accessibility API
+        if let axWindow = findAccessibilityWindow(for: window, in: app) {
+            // Set the minimized attribute
+            var minimizedValue: AnyObject?
+            let minimizedAttr = kAXMinimizedAttribute as CFString
+
+            // First check if window can be minimized
+            if AXUIElementCopyAttributeValue(axWindow, minimizedAttr, &minimizedValue) == .success {
+                // Set minimized to true
+                let result = AXUIElementSetAttributeValue(axWindow, minimizedAttr, kCFBooleanTrue)
+
+                if result == .success {
+                    logger.info("Successfully minimized window: \(window.title)")
+                } else {
+                    logger.warning("Failed to minimize window: \(window.title), error code: \(result.rawValue)")
+
+                    // Try alternative method using minimize button
+                    minimizeWindowViaButton(axWindow, window: window)
+                }
+            } else {
+                // Try minimize button as fallback
+                minimizeWindowViaButton(axWindow, window: window)
+            }
+        } else {
+            logger.warning("Could not find accessibility window for: \(window.title)")
+        }
+    }
+
+    /// Alternative method to minimize window using the minimize button
+    private func minimizeWindowViaButton(_ axWindow: AXUIElement, window: WindowInfo) {
+        var minimizeButtonValue: AnyObject?
+        let minimizeButtonAttr = kAXMinimizeButtonAttribute as CFString
+
+        if AXUIElementCopyAttributeValue(axWindow, minimizeButtonAttr, &minimizeButtonValue) == .success,
+           let minimizeButton = minimizeButtonValue as! AXUIElement? {
+            let result = AXUIElementPerformAction(minimizeButton, kAXPressAction as CFString)
+
+            if result == .success {
+                logger.info("Successfully minimized window via button: \(window.title)")
+            } else {
+                logger.warning("Failed to minimize window via button: \(window.title)")
+            }
+        } else {
+            logger.warning("Could not find minimize button for window: \(window.title)")
+        }
+    }
 }
