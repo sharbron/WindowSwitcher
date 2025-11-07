@@ -20,6 +20,11 @@ let package = Package(
                 "Info.plist",
                 "WindowSwitcher.entitlements"
             ]
+        ),
+        .testTarget(
+            name: "WindowSwitcherTests",
+            dependencies: ["WindowSwitcher"],
+            path: "Tests/WindowSwitcherTests"
         )
     ]
 )
