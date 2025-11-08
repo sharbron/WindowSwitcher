@@ -11,7 +11,10 @@ A native macOS utility that brings Windows-style window switching to Mac - switc
 - 🪟 **Window-Level Switching** - See and switch between all open windows, not just applications
 - 🖼️ **Live Previews** - Visual thumbnails of each window for easy identification
 - ⌨️ **Native Cmd+Tab Override** - Seamlessly replaces the default macOS app switcher
-- 🎯 **Auto-Scroll Navigation** - Selected window stays centered when navigating
+- 🔍 **Real-Time Search** - Type to search windows by title or app name instantly
+- 🎯 **Direct Window Access** - Press Cmd+1-9 to jump directly to windows with visual badges
+- 🎬 **Window Actions** - Close or minimize windows with hover buttons (no need to switch first)
+- 📊 **Smart Window Management** - Auto-scroll navigation, window count display, scroll indicators
 - 🎨 **Smart Window Filtering** - Removes tiny/irrelevant windows, intelligent sorting
 - ⚙️ **Customizable Settings** - Adjust thumbnail size, max windows, and display options
 - 🚀 **Launch at Login** - Optionally start automatically when you log in
@@ -57,12 +60,19 @@ This creates `WindowSwitcher.app` ready to install.
 
 ## Usage
 
+### Basic Navigation
 1. Press `Cmd+Tab` to open the window switcher
 2. Keep holding `Cmd` and press `Tab` to cycle through windows
 3. Press `Shift+Tab` while holding `Cmd` to cycle backwards
 4. Release `Cmd` to activate the selected window
 5. Press `Esc` to cancel without switching
-6. Configure preferences via the menu bar icon
+
+### Advanced Features
+- **Search**: Start typing to filter windows by title or app name
+- **Direct Access**: Press `Cmd+1` through `Cmd+9` to jump to specific windows
+- **Window Actions**: Hover over a window and click the minimize (-) or close (×) button
+- **Clear Search**: Press `Backspace` to clear your search query
+- **Settings**: Click the menu bar icon to configure preferences
 
 ## Permissions
 
@@ -247,4 +257,4 @@ Built with:
 
 ---
 
-*Last Updated: 2025-11-06*
+*Last Updated: 2025-11-08*

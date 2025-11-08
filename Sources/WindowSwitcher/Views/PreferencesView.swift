@@ -1,5 +1,6 @@
 import SwiftUI
 import ServiceManagement
+import os.log
 
 struct PreferencesView: View {
     @AppStorage("launchAtLogin") private var launchAtLogin: Bool = false
@@ -7,6 +8,8 @@ struct PreferencesView: View {
     @AppStorage("thumbnailSize") private var thumbnailSize: Double = 200
     @AppStorage("maxWindowsToShow") private var maxWindowsToShow: Double = 20
     @AppStorage("useAppIcons") private var useAppIcons: Bool = false
+
+    private let logger = Logger(subsystem: "com.windowswitcher", category: "Preferences")
 
     var body: some View {
         VStack(spacing: 0) {
@@ -129,28 +132,60 @@ struct PreferencesView: View {
 
                     // Permissions Section
                     PreferenceSection(title: "Permissions", icon: "lock.shield") {
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                Image(systemName: "checkmark.shield.fill")
-                                    .foregroundColor(.green)
-                                Text("Accessibility access required")
-                                    .font(.subheadline)
+                        VStack(alignment: .leading, spacing: 16) {
+                            // Accessibility Permission
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Image(systemName: "checkmark.shield.fill")
+                                        .foregroundColor(.green)
+                                    Text("Accessibility access required")
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+                                }
+
+                                Text(
+                                    """
+                                    Window Switcher needs Accessibility permissions to \
+                                    monitor keyboard shortcuts and control windows.
+                                    """
+                                )
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+
+                                Button("Open Accessibility Settings") {
+                                    openAccessibilityPreferences()
+                                }
+                                .buttonStyle(.bordered)
+                                .padding(.top, 4)
                             }
 
-                            Text(
-                                """
-                                Window Switcher needs Accessibility permissions to \
-                                monitor keyboard shortcuts and control windows.
-                                """
-                            )
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                            Divider()
 
-                            Button("Open System Settings") {
-                                openAccessibilityPreferences()
+                            // Screen Recording Permission
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Image(systemName: "camera.fill")
+                                        .foregroundColor(.orange)
+                                    Text("Screen Recording access recommended")
+                                        .font(.subheadline)
+                                        .fontWeight(.medium)
+                                }
+
+                                Text(
+                                    """
+                                    Capture live window previews for better identification. \
+                                    Falls back to app icons if denied.
+                                    """
+                                )
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+
+                                Button("Open Screen Recording Settings") {
+                                    openScreenRecordingPreferences()
+                                }
+                                .buttonStyle(.bordered)
+                                .padding(.top, 4)
                             }
-                            .buttonStyle(.bordered)
-                            .padding(.top, 4)
                         }
                     }
 
@@ -159,13 +194,45 @@ struct PreferencesView: View {
                     // Keyboard Shortcuts Section
                     PreferenceSection(title: "Keyboard Shortcuts", icon: "command") {
                         VStack(alignment: .leading, spacing: 8) {
+                            Text("Navigation")
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.secondary)
+                                .padding(.top, 4)
+
                             ShortcutRow(keys: "⌘ Tab", description: "Show switcher and select next window")
                             ShortcutRow(keys: "⌘⇧ Tab", description: "Select previous window")
                             ShortcutRow(keys: "Esc", description: "Cancel and close switcher")
                             ShortcutRow(keys: "Release ⌘", description: "Activate selected window")
+
+                            Text("Search & Filter")
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.secondary)
+                                .padding(.top, 12)
+
+                            ShortcutRow(keys: "Type (a-z, 0-9)", description: "Search windows by title or app name")
+                            ShortcutRow(keys: "⌫ Backspace", description: "Clear search query")
+
+                            Text("Direct Access")
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.secondary)
+                                .padding(.top, 12)
+
+                            ShortcutRow(keys: "⌘ 1-9", description: "Jump directly to window 1-9")
+
+                            Text("Window Actions")
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.secondary)
+                                .padding(.top, 12)
+
+                            ShortcutRow(keys: "Hover + Click ✕", description: "Close window")
+                            ShortcutRow(keys: "Hover + Click −", description: "Minimize window")
                         }
 
-                        Text("Keyboard shortcuts cannot be customized at this time.")
+                        Text("Primary shortcuts (⌘Tab, ⌘⇧Tab, Esc) are fixed and cannot be customized.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                             .padding(.top, 8)
@@ -198,21 +265,21 @@ struct PreferencesView: View {
         do {
             if enable {
                 if SMAppService.mainApp.status == .enabled {
-                    print("Launch at login already enabled")
+                    logger.info("Launch at login already enabled")
                 } else {
                     try SMAppService.mainApp.register()
-                    print("Launch at login enabled successfully")
+                    logger.info("Launch at login enabled successfully")
                 }
             } else {
                 if SMAppService.mainApp.status == .enabled {
                     try SMAppService.mainApp.unregister()
-                    print("Launch at login disabled successfully")
+                    logger.info("Launch at login disabled successfully")
                 } else {
-                    print("Launch at login already disabled")
+                    logger.info("Launch at login already disabled")
                 }
             }
         } catch {
-            print("Failed to \(enable ? "enable" : "disable") launch at login: \(error.localizedDescription)")
+            logger.error("Failed to \(enable ? "enable" : "disable") launch at login: \(error.localizedDescription)")
             // Revert the toggle if the operation failed
             DispatchQueue.main.async {
                 launchAtLogin = !enable
@@ -225,12 +292,37 @@ struct PreferencesView: View {
         NSWorkspace.shared.open(url)
     }
 
+    private func openScreenRecordingPreferences() {
+        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
+        NSWorkspace.shared.open(url)
+    }
+
     private func resetToDefaults() {
+        logger.info("Resetting preferences to defaults")
+
+        // First, clear all preference keys from UserDefaults
+        UserDefaults.standard.removeObject(forKey: "launchAtLogin")
+        UserDefaults.standard.removeObject(forKey: "showWindowTitles")
+        UserDefaults.standard.removeObject(forKey: "thumbnailSize")
+        UserDefaults.standard.removeObject(forKey: "maxWindowsToShow")
+        UserDefaults.standard.removeObject(forKey: "useAppIcons")
+
+        // Then set the default values (which will write back to UserDefaults)
         launchAtLogin = false
         showWindowTitles = true
         thumbnailSize = 200
         maxWindowsToShow = 20
         useAppIcons = false
+
+        // Also handle launch at login system state
+        if SMAppService.mainApp.status == .enabled {
+            do {
+                try SMAppService.mainApp.unregister()
+                logger.info("Launch at login disabled during reset")
+            } catch {
+                logger.error("Failed to disable launch at login during reset: \(error.localizedDescription)")
+            }
+        }
     }
 }
 
