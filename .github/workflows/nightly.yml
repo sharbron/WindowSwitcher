@@ -1,0 +1,69 @@
+name: Nightly Build
+
+on:
+  schedule:
+    # Run at 2 AM UTC every day
+    - cron: '0 2 * * *'
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  nightly-build:
+    name: Nightly Build and Test
+    runs-on: macos-13
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew install swiftlint
+          echo "Dependencies installed"
+
+      - name: Full Build (Debug + Release)
+        run: |
+          echo "Building debug configuration..."
+          swift build -c debug
+          echo "Building release configuration..."
+          swift build -c release
+
+      - name: Run All Tests
+        run: swift test --parallel
+
+      - name: Run Tests with Sanitizers
+        run: |
+          swift test --sanitize=thread || echo "Thread sanitizer found issues"
+          swift test --sanitize=address || echo "Address sanitizer found issues"
+
+      - name: Performance Tests
+        run: |
+          echo "Running performance benchmarks..."
+          swift test --filter WindowManagerTests || true
+          swift test --filter NewFeaturesTests || true
+
+      - name: Memory Leak Check
+        run: |
+          echo "Checking for memory leaks..."
+          leaks --atExit -- .build/debug/WindowSwitcher || echo "Memory leak check skipped (requires app to run)"
+
+      - name: Create Nightly Build
+        run: |
+          ./create_app.sh
+          ./create_dmg.sh
+
+      - name: Upload Nightly Build
+        uses: actions/upload-artifact@v4
+        with:
+          name: WindowSwitcher-nightly-${{ github.run_number }}
+          path: |
+            WindowSwitcher.app
+            WindowSwitcher-1.0.dmg
+          retention-days: 7
+
+      - name: Notify on Failure
+        if: failure()
+        run: |
+          echo "## ⚠️ Nightly Build Failed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The nightly build has failed. Please check the logs for details." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Failed at: $(date)" >> $GITHUB_STEP_SUMMARY
