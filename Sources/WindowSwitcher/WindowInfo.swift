@@ -76,8 +76,9 @@ class WindowManager: ObservableObject {
         activationLock.unlock()
 
         // Save asynchronously to avoid blocking
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            self?.userDefaults.set(orderToSave, forKey: "windowActivationOrder")
+        // Capture userDefaults directly to ensure save always happens
+        DispatchQueue.global(qos: .utility).async { [userDefaults = self.userDefaults] in
+            userDefaults.set(orderToSave, forKey: "windowActivationOrder")
         }
     }
 

@@ -158,30 +158,34 @@ final class AppStateTests: XCTestCase {
         // When: Opening about window
         appState.openAboutWindow()
 
-        // Then: Window should have expected size
+        // Then: Window should have expected content size
         guard let window = appState.aboutWindow else {
             XCTFail("About window should be created")
             return
         }
 
-        let expectedSize = NSSize(width: 420, height: 540)
-        XCTAssertEqual(window.frame.size.width, expectedSize.width, accuracy: 1.0)
-        XCTAssertEqual(window.frame.size.height, expectedSize.height, accuracy: 1.0)
+        // Check content size (excludes title bar)
+        let expectedContentSize = NSSize(width: 420, height: 540)
+        let contentFrame = window.contentView?.frame ?? .zero
+        XCTAssertEqual(contentFrame.size.width, expectedContentSize.width, accuracy: 1.0)
+        XCTAssertEqual(contentFrame.size.height, expectedContentSize.height, accuracy: 1.0)
     }
 
     func testPreferencesWindowSize() {
         // When: Opening preferences window
         appState.openPreferencesWindow()
 
-        // Then: Window should have expected size
+        // Then: Window should have expected content size
         guard let window = appState.preferencesWindow else {
             XCTFail("Preferences window should be created")
             return
         }
 
-        let expectedSize = NSSize(width: 600, height: 650)
-        XCTAssertEqual(window.frame.size.width, expectedSize.width, accuracy: 1.0)
-        XCTAssertEqual(window.frame.size.height, expectedSize.height, accuracy: 1.0)
+        // Check content size (excludes title bar)
+        let expectedContentSize = NSSize(width: 600, height: 650)
+        let contentFrame = window.contentView?.frame ?? .zero
+        XCTAssertEqual(contentFrame.size.width, expectedContentSize.width, accuracy: 1.0)
+        XCTAssertEqual(contentFrame.size.height, expectedContentSize.height, accuracy: 1.0)
     }
 
     // MARK: - Window Style Tests
