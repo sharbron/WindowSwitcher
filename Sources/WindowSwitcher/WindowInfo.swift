@@ -58,6 +58,11 @@ class WindowManager: ObservableObject {
         userDefaults.set(orderToSave, forKey: "windowActivationOrder")
     }
 
+    /// Synchronously save activation history (for testing)
+    func flushActivationHistory() {
+        saveActivationHistory()
+    }
+
     func recordWindowActivation(_ windowID: CGWindowID) {
         // Protect array access with lock
         activationLock.lock()
