@@ -1,0 +1,111 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g., 1.1.0)'
+        required: true
+        type: string
+
+jobs:
+  build-release:
+    name: Build Release
+    runs-on: macos-13
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Select Xcode version
+        run: sudo xcode-select -s /Applications/Xcode_15.0.app/Contents/Developer
+
+      - name: Install SwiftLint
+        run: brew install swiftlint
+
+      - name: Run SwiftLint
+        run: swiftlint
+
+      - name: Run Tests
+        run: swift test
+
+      - name: Build Release
+        run: swift build -c release
+
+      - name: Create App Bundle
+        run: ./create_app.sh
+
+      - name: Create DMG
+        run: ./create_dmg.sh
+
+      - name: Get version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "VERSION=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate checksums
+        run: |
+          shasum -a 256 WindowSwitcher-1.0.dmg > checksums.txt
+          cat checksums.txt
+
+      - name: Create Release Notes
+        run: |
+          cat > release_notes.md << 'EOF'
+          ## WindowSwitcher v${{ steps.version.outputs.VERSION }}
+
+          ### Features
+          - 🪟 Window-level switching (not just applications)
+          - 🔍 Real-time search and filtering
+          - 🎯 Direct window access with Cmd+1-9
+          - 🎬 Window actions (close/minimize from switcher)
+          - 🖼️ Live window previews or app icons
+          - 📊 Smart window management with auto-scroll
+          - ⚙️ Customizable preferences
+
+          ### Installation
+          1. Download `WindowSwitcher-1.0.dmg`
+          2. Open the DMG and drag WindowSwitcher to Applications
+          3. Run in Terminal: `xattr -cr /Applications/WindowSwitcher.app`
+          4. Launch and grant permissions when prompted
+
+          ### System Requirements
+          - macOS 13.0 (Ventura) or later
+          - Accessibility permission (required)
+          - Screen Recording permission (recommended)
+
+          ### Checksums
+          See `checksums.txt` for SHA-256 verification.
+
+          ### Known Issues
+          This is an unsigned build. See README.md for installation instructions.
+          EOF
+
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            WindowSwitcher-1.0.dmg
+            checksums.txt
+          body_path: release_notes.md
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Artifacts (workflow_dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: WindowSwitcher-v${{ steps.version.outputs.VERSION }}
+          path: |
+            WindowSwitcher-1.0.dmg
+            checksums.txt
+            release_notes.md
+          retention-days: 30

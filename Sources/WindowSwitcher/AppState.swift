@@ -11,7 +11,13 @@ class AppState: ObservableObject {
     var preferencesWindow: NSWindow?
 
     func openAboutWindow() {
-        if aboutWindow == nil || !aboutWindow!.isVisible {
+        // Check if window exists and is visible
+        if let window = aboutWindow, window.isVisible {
+            // Window exists and is visible - bring to front
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        } else {
+            // Window doesn't exist or is not visible - create new one
             let window = createWindow(
                 title: "About Window Switcher",
                 view: AboutView(),
@@ -19,14 +25,17 @@ class AppState: ObservableObject {
             )
             aboutWindow = window
             isAboutWindowOpen = true
-        } else {
-            aboutWindow?.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
         }
     }
 
     func openPreferencesWindow() {
-        if preferencesWindow == nil || !preferencesWindow!.isVisible {
+        // Check if window exists and is visible
+        if let window = preferencesWindow, window.isVisible {
+            // Window exists and is visible - bring to front
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        } else {
+            // Window doesn't exist or is not visible - create new one
             let window = createWindow(
                 title: "Window Switcher Preferences",
                 view: PreferencesView(),
@@ -34,9 +43,6 @@ class AppState: ObservableObject {
             )
             preferencesWindow = window
             isPreferencesWindowOpen = true
-        } else {
-            preferencesWindow?.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
         }
     }
 
