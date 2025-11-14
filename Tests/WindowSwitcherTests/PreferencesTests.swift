@@ -4,16 +4,22 @@ import XCTest
 /// Unit tests for user preferences and UserDefaults integration
 final class PreferencesTests: XCTestCase {
 
-    let testDefaults = UserDefaults(suiteName: "com.windowswitcher.preferences.tests")!
+    var testDefaults: UserDefaults!
+    var suiteName: String!
 
     override func setUp() {
         super.setUp()
+        // Create unique suite name for this test instance to prevent parallel test pollution
+        suiteName = "com.windowswitcher.preferences.tests.\(UUID().uuidString)"
+        testDefaults = UserDefaults(suiteName: suiteName)!
         // Clean slate for each test
-        testDefaults.removePersistentDomain(forName: "com.windowswitcher.preferences.tests")
+        testDefaults.removePersistentDomain(forName: suiteName)
     }
 
     override func tearDown() {
-        testDefaults.removePersistentDomain(forName: "com.windowswitcher.preferences.tests")
+        testDefaults.removePersistentDomain(forName: suiteName)
+        testDefaults = nil
+        suiteName = nil
         super.tearDown()
     }
 
@@ -421,7 +427,7 @@ final class PreferencesTests: XCTestCase {
         testDefaults.set(true, forKey: "launchAtLogin")
 
         // Create new UserDefaults instance with same suite
-        let newDefaults = UserDefaults(suiteName: "com.windowswitcher.preferences.tests")!
+        let newDefaults = UserDefaults(suiteName: suiteName)!
 
         // Verify values persist
         XCTAssertEqual(newDefaults.double(forKey: "thumbnailSize"), 250.0)

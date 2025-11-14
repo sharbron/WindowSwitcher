@@ -5,18 +5,24 @@ import XCTest
 final class WindowManagerTests: XCTestCase {
 
     var windowManager: WindowManager!
-    let testDefaults = UserDefaults(suiteName: "com.windowswitcher.tests")!
+    var testDefaults: UserDefaults!
+    var suiteName: String!
 
     override func setUp() {
         super.setUp()
+        // Create unique suite name for this test instance to prevent parallel test pollution
+        suiteName = "com.windowswitcher.tests.\(UUID().uuidString)"
+        testDefaults = UserDefaults(suiteName: suiteName)!
         // Use test-specific UserDefaults
-        testDefaults.removePersistentDomain(forName: "com.windowswitcher.tests")
-        windowManager = WindowManager()
+        testDefaults.removePersistentDomain(forName: suiteName)
+        windowManager = WindowManager(userDefaults: testDefaults)
     }
 
     override func tearDown() {
         windowManager = nil
-        testDefaults.removePersistentDomain(forName: "com.windowswitcher.tests")
+        testDefaults.removePersistentDomain(forName: suiteName)
+        testDefaults = nil
+        suiteName = nil
         super.tearDown()
     }
 
@@ -28,9 +34,10 @@ final class WindowManagerTests: XCTestCase {
 
         // When: Recording an activation
         windowManager.recordWindowActivation(windowID)
+        windowManager.flushActivationHistory() // Synchronously save for testing
 
-        // Then: Should be saved to UserDefaults
-        let saved = UserDefaults.standard.array(forKey: "windowActivationOrder") as? [UInt32]
+        // Then: Verify saved to UserDefaults
+        let saved = testDefaults.array(forKey: "windowActivationOrder") as? [UInt32]
         XCTAssertNotNil(saved, "Activation order should be saved")
         XCTAssertEqual(saved?.first, UInt32(windowID), "Most recent activation should be first")
     }
@@ -45,9 +52,10 @@ final class WindowManagerTests: XCTestCase {
         windowManager.recordWindowActivation(window1)
         windowManager.recordWindowActivation(window2)
         windowManager.recordWindowActivation(window3)
+        windowManager.flushActivationHistory() // Synchronously save for testing
 
-        // Then: Most recent should be first
-        let saved = UserDefaults.standard.array(forKey: "windowActivationOrder") as? [UInt32]
+        // Then: Verify order
+        let saved = testDefaults.array(forKey: "windowActivationOrder") as? [UInt32]
         XCTAssertEqual(saved?.count, 3)
         XCTAssertEqual(saved?[0], UInt32(window3), "Most recent window should be first")
         XCTAssertEqual(saved?[1], UInt32(window2), "Second most recent should be second")
@@ -64,9 +72,10 @@ final class WindowManagerTests: XCTestCase {
 
         // When: Re-activating window1
         windowManager.recordWindowActivation(window1)
+        windowManager.flushActivationHistory() // Synchronously save for testing
 
-        // Then: window1 should be moved to front without duplicates
-        let saved = UserDefaults.standard.array(forKey: "windowActivationOrder") as? [UInt32]
+        // Then: Verify no duplicates
+        let saved = testDefaults.array(forKey: "windowActivationOrder") as? [UInt32]
         XCTAssertEqual(saved?.count, 2, "Should not have duplicates")
         XCTAssertEqual(saved?[0], UInt32(window1), "Re-activated window should be first")
         XCTAssertEqual(saved?[1], UInt32(window2), "Previous window should be second")
@@ -81,9 +90,10 @@ final class WindowManagerTests: XCTestCase {
         for windowID in windowIDs {
             windowManager.recordWindowActivation(windowID)
         }
+        windowManager.flushActivationHistory() // Synchronously save for testing
 
-        // Then: History should be limited to maxSize
-        let saved = UserDefaults.standard.array(forKey: "windowActivationOrder") as? [UInt32]
+        // Then: Verify history limit
+        let saved = testDefaults.array(forKey: "windowActivationOrder") as? [UInt32]
         XCTAssertEqual(saved?.count, maxSize, "History should be limited to \(maxSize) entries")
 
         // Most recent 50 windows should be preserved
@@ -190,7 +200,7 @@ extension WindowManagerTests {
         measure {
             // Simulate the sorting logic from refreshWindows
             let _ = testWindows.sorted { lhs, rhs in
-                let saved = UserDefaults.standard.array(forKey: "windowActivationOrder") as? [UInt32] ?? []
+                let saved = self.testDefaults.array(forKey: "windowActivationOrder") as? [UInt32] ?? []
                 let activationOrder = saved.map { CGWindowID($0) }
 
                 let lhsIndex = activationOrder.firstIndex(of: lhs.id) ?? Int.max
