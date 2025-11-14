@@ -24,7 +24,8 @@ let package = Package(
         .testTarget(
             name: "WindowSwitcherTests",
             dependencies: ["WindowSwitcher"],
-            path: "Tests/WindowSwitcherTests"
+            path: "Tests/WindowSwitcherTests",
+            exclude: ["README.md"]
         )
     ]
 )
