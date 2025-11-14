@@ -163,9 +163,17 @@ class KeyboardMonitor: ObservableObject {
 
             // Character typing for search (when switcher is showing, no Cmd key)
             if isShowingSwitcher && !flags.contains(.maskCommand) {
-                if let characters = event.characters, !characters.isEmpty {
+                // Get Unicode string from keyboard event
+                var length = 0
+                event.keyboardGetUnicodeString(maxStringLength: 4, actualStringLength: &length, unicodeString: nil)
+
+                if length > 0 {
+                    var chars = [UniChar](repeating: 0, count: length)
+                    event.keyboardGetUnicodeString(maxStringLength: 4, actualStringLength: &length, unicodeString: &chars)
+                    let string = String(utf16CodeUnits: chars, count: length)
+
                     // Filter out control characters
-                    let filtered = characters.filter { $0.isLetter || $0.isNumber || $0.isWhitespace }
+                    let filtered = string.filter { $0.isLetter || $0.isNumber || $0.isWhitespace }
                     if !filtered.isEmpty {
                         DispatchQueue.main.async {
                             self.onCharacterTyped?(String(filtered))
