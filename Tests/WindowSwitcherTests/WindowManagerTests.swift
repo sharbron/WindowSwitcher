@@ -103,9 +103,9 @@ final class WindowManagerTests: XCTestCase {
             windowManager.recordWindowActivation(windowID)
         }
 
-        // Then: Wait for async save and verify history limit
+        // Then: Wait for async save and verify history limit (longer for 60 activations)
         let expectation = XCTestExpectation(description: "UserDefaults save")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
             let saved = self.testDefaults.array(forKey: "windowActivationOrder") as? [UInt32]
             XCTAssertEqual(saved?.count, maxSize, "History should be limited to \(maxSize) entries")
 

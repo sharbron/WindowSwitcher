@@ -427,7 +427,7 @@ final class PreferencesTests: XCTestCase {
         testDefaults.set(true, forKey: "launchAtLogin")
 
         // Create new UserDefaults instance with same suite
-        let newDefaults = UserDefaults(suiteName: "com.windowswitcher.preferences.tests")!
+        let newDefaults = UserDefaults(suiteName: suiteName)!
 
         // Verify values persist
         XCTAssertEqual(newDefaults.double(forKey: "thumbnailSize"), 250.0)
