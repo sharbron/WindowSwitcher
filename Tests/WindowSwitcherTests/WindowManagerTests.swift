@@ -11,7 +11,7 @@ final class WindowManagerTests: XCTestCase {
         super.setUp()
         // Use test-specific UserDefaults
         testDefaults.removePersistentDomain(forName: "com.windowswitcher.tests")
-        windowManager = WindowManager()
+        windowManager = WindowManager(userDefaults: testDefaults)
     }
 
     override func tearDown() {
@@ -32,7 +32,7 @@ final class WindowManagerTests: XCTestCase {
         // Then: Wait for async UserDefaults save to complete
         let expectation = XCTestExpectation(description: "UserDefaults save")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            let saved = UserDefaults.standard.array(forKey: "windowActivationOrder") as? [UInt32]
+            let saved = self.testDefaults.array(forKey: "windowActivationOrder") as? [UInt32]
             XCTAssertNotNil(saved, "Activation order should be saved")
             XCTAssertEqual(saved?.first, UInt32(windowID), "Most recent activation should be first")
             expectation.fulfill()
@@ -54,7 +54,7 @@ final class WindowManagerTests: XCTestCase {
         // Then: Wait for async UserDefaults save and verify order
         let expectation = XCTestExpectation(description: "UserDefaults save")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            let saved = UserDefaults.standard.array(forKey: "windowActivationOrder") as? [UInt32]
+            let saved = self.testDefaults.array(forKey: "windowActivationOrder") as? [UInt32]
             XCTAssertEqual(saved?.count, 3)
             XCTAssertEqual(saved?[0], UInt32(window3), "Most recent window should be first")
             XCTAssertEqual(saved?[1], UInt32(window2), "Second most recent should be second")
@@ -78,7 +78,7 @@ final class WindowManagerTests: XCTestCase {
         // Then: Wait for async save and verify no duplicates
         let expectation = XCTestExpectation(description: "UserDefaults save")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            let saved = UserDefaults.standard.array(forKey: "windowActivationOrder") as? [UInt32]
+            let saved = self.testDefaults.array(forKey: "windowActivationOrder") as? [UInt32]
             XCTAssertEqual(saved?.count, 2, "Should not have duplicates")
             XCTAssertEqual(saved?[0], UInt32(window1), "Re-activated window should be first")
             XCTAssertEqual(saved?[1], UInt32(window2), "Previous window should be second")
@@ -100,7 +100,7 @@ final class WindowManagerTests: XCTestCase {
         // Then: Wait for async save and verify history limit
         let expectation = XCTestExpectation(description: "UserDefaults save")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-            let saved = UserDefaults.standard.array(forKey: "windowActivationOrder") as? [UInt32]
+            let saved = self.testDefaults.array(forKey: "windowActivationOrder") as? [UInt32]
             XCTAssertEqual(saved?.count, maxSize, "History should be limited to \(maxSize) entries")
 
             // Most recent 50 windows should be preserved
@@ -210,7 +210,7 @@ extension WindowManagerTests {
         measure {
             // Simulate the sorting logic from refreshWindows
             let _ = testWindows.sorted { lhs, rhs in
-                let saved = UserDefaults.standard.array(forKey: "windowActivationOrder") as? [UInt32] ?? []
+                let saved = self.testDefaults.array(forKey: "windowActivationOrder") as? [UInt32] ?? []
                 let activationOrder = saved.map { CGWindowID($0) }
 
                 let lhsIndex = activationOrder.firstIndex(of: lhs.id) ?? Int.max

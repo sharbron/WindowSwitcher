@@ -30,7 +30,11 @@ class WindowManager: ObservableObject {
     private let activationLock = NSLock()
     private let maxActivationHistorySize = 50
 
-    init() {
+    // UserDefaults instance for testing/dependency injection
+    private let userDefaults: UserDefaults
+
+    init(userDefaults: UserDefaults = .standard) {
+        self.userDefaults = userDefaults
         // Start background cache refresh timer (every 2 seconds)
         startCacheRefresh()
         loadActivationHistory()
@@ -38,7 +42,7 @@ class WindowManager: ObservableObject {
 
     private func loadActivationHistory() {
         // Load previously saved activation order
-        if let saved = UserDefaults.standard.array(forKey: "windowActivationOrder") as? [UInt32] {
+        if let saved = userDefaults.array(forKey: "windowActivationOrder") as? [UInt32] {
             activationLock.lock()
             windowActivationOrder = saved.map { CGWindowID($0) }
             activationLock.unlock()
@@ -51,7 +55,7 @@ class WindowManager: ObservableObject {
         let orderToSave = windowActivationOrder.map { UInt32($0) }
         activationLock.unlock()
 
-        UserDefaults.standard.set(orderToSave, forKey: "windowActivationOrder")
+        userDefaults.set(orderToSave, forKey: "windowActivationOrder")
     }
 
     func recordWindowActivation(_ windowID: CGWindowID) {
@@ -72,8 +76,8 @@ class WindowManager: ObservableObject {
         activationLock.unlock()
 
         // Save asynchronously to avoid blocking
-        DispatchQueue.global(qos: .utility).async {
-            UserDefaults.standard.set(orderToSave, forKey: "windowActivationOrder")
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            self?.userDefaults.set(orderToSave, forKey: "windowActivationOrder")
         }
     }
 
@@ -385,7 +389,7 @@ class WindowManager: ObservableObject {
 
     func captureWindowThumbnail(_ window: WindowInfo) -> NSImage? {
         // Check user preference for using app icons
-        let useAppIcons = UserDefaults.standard.bool(forKey: "useAppIcons")
+        let useAppIcons = userDefaults.bool(forKey: "useAppIcons")
 
         if useAppIcons {
             return getAppIcon(for: window)
