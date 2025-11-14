@@ -169,7 +169,11 @@ class KeyboardMonitor: ObservableObject {
 
                 if length > 0 {
                     var chars = [UniChar](repeating: 0, count: length)
-                    event.keyboardGetUnicodeString(maxStringLength: 4, actualStringLength: &length, unicodeString: &chars)
+                    event.keyboardGetUnicodeString(
+                        maxStringLength: 4,
+                        actualStringLength: &length,
+                        unicodeString: &chars
+                    )
                     let string = String(utf16CodeUnits: chars, count: length)
 
                     // Filter out control characters

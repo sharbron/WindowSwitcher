@@ -282,27 +282,29 @@ struct WindowThumbnailView: View {
                             Spacer()
 
                             if let onMinimize = onMinimize {
-                                Button(action: {
-                                    onMinimize()
-                                }) {
-                                    Image(systemName: "minus.circle.fill")
-                                        .font(.system(size: 24))
-                                        .foregroundColor(.orange)
-                                        .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
-                                }
+                                Button(
+                                    action: { onMinimize() },
+                                    label: {
+                                        Image(systemName: "minus.circle.fill")
+                                            .font(.system(size: 24))
+                                            .foregroundColor(.orange)
+                                            .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
+                                    }
+                                )
                                 .buttonStyle(.plain)
                                 .help("Minimize Window")
                             }
 
                             if let onClose = onClose {
-                                Button(action: {
-                                    onClose()
-                                }) {
-                                    Image(systemName: "xmark.circle.fill")
-                                        .font(.system(size: 24))
-                                        .foregroundColor(.red)
-                                        .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
-                                }
+                                Button(
+                                    action: { onClose() },
+                                    label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .font(.system(size: 24))
+                                            .foregroundColor(.red)
+                                            .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
+                                    }
+                                )
                                 .buttonStyle(.plain)
                                 .help("Close Window")
                             }
