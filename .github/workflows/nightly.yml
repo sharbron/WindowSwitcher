@@ -51,7 +51,7 @@ jobs:
           ./create_dmg.sh
 
       - name: Upload Nightly Build
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: WindowSwitcher-nightly-${{ github.run_number }}
           path: |
