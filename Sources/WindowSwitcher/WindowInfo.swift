@@ -446,6 +446,7 @@ class WindowManager: ObservableObject {
 
             if AXUIElementCopyAttributeValue(axWindow, closeButtonAttr, &closeButtonValue) == .success {
                 // Cast to AXUIElement (safe because copy succeeded)
+                // swiftlint:disable:next force_cast
                 let closeButton = closeButtonValue as! AXUIElement
                 // Press the close button
                 let result = AXUIElementPerformAction(closeButton, kAXPressAction as CFString)
@@ -507,6 +508,7 @@ class WindowManager: ObservableObject {
 
         if AXUIElementCopyAttributeValue(axWindow, minimizeButtonAttr, &minimizeButtonValue) == .success {
             // Cast to AXUIElement (safe because copy succeeded)
+            // swiftlint:disable:next force_cast
             let minimizeButton = minimizeButtonValue as! AXUIElement
             let result = AXUIElementPerformAction(minimizeButton, kAXPressAction as CFString)
 
