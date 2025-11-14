@@ -14,13 +14,10 @@ on:
 jobs:
   build-release:
     name: Build Release
-    runs-on: macos-13
+    runs-on: macos-14
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-
-      - name: Select Xcode version
-        run: sudo xcode-select -s /Applications/Xcode_15.0.app/Contents/Developer
 
       - name: Install SwiftLint
         run: brew install swiftlint

@@ -9,7 +9,7 @@ on:
 jobs:
   nightly-build:
     name: Nightly Build and Test
-    runs-on: macos-13
+    runs-on: macos-14
     steps:
       - name: Checkout code
         uses: actions/checkout@v5

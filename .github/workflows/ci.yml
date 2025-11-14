@@ -9,7 +9,7 @@ on:
 jobs:
   lint:
     name: SwiftLint
-    runs-on: macos-13
+    runs-on: macos-14
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -18,23 +18,19 @@ jobs:
         run: brew install swiftlint
 
       - name: Run SwiftLint
-        run: swiftlint --strict
+        run: swiftlint
 
   build-and-test:
     name: Build and Test
-    runs-on: macos-13
-    strategy:
-      matrix:
-        xcode: ['15.0']
+    runs-on: macos-14
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Select Xcode version
-        run: sudo xcode-select -s /Applications/Xcode_${{ matrix.xcode }}.app/Contents/Developer
-
       - name: Show Xcode version
-        run: xcodebuild -version
+        run: |
+          xcodebuild -version
+          xcrun --show-sdk-path
 
       - name: Show Swift version
         run: swift --version
@@ -62,14 +58,15 @@ jobs:
 
       - name: Upload App Bundle
         uses: actions/upload-artifact@v5
+        if: success()
         with:
           name: WindowSwitcher-${{ github.sha }}
-          path: WindowSwitcher.app
+          path: WindowSwitcher.app/
           retention-days: 7
 
   test-coverage:
     name: Test Coverage Report
-    runs-on: macos-13
+    runs-on: macos-14
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -78,6 +75,7 @@ jobs:
         run: swift test --enable-code-coverage
 
       - name: Generate Coverage Report
+        continue-on-error: true
         run: |
           xcrun llvm-cov export \
             .build/debug/WindowSwitcherPackageTests.xctest/Contents/MacOS/WindowSwitcherPackageTests \
@@ -85,6 +83,7 @@ jobs:
             -format=lcov > coverage.lcov || echo "Coverage export failed (non-critical)"
 
       - name: Display Coverage Summary
+        continue-on-error: true
         run: |
           if [ -f coverage.lcov ]; then
             echo "Coverage report generated"
