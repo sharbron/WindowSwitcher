@@ -445,7 +445,7 @@ class WindowManager: ObservableObject {
             let closeButtonAttr = kAXCloseButtonAttribute as CFString
 
             if AXUIElementCopyAttributeValue(axWindow, closeButtonAttr, &closeButtonValue) == .success,
-               let closeButton = closeButtonValue as! AXUIElement? {
+               let closeButton = closeButtonValue as? AXUIElement {
                 // Press the close button
                 let result = AXUIElementPerformAction(closeButton, kAXPressAction as CFString)
 
@@ -505,7 +505,7 @@ class WindowManager: ObservableObject {
         let minimizeButtonAttr = kAXMinimizeButtonAttribute as CFString
 
         if AXUIElementCopyAttributeValue(axWindow, minimizeButtonAttr, &minimizeButtonValue) == .success,
-           let minimizeButton = minimizeButtonValue as! AXUIElement? {
+           let minimizeButton = minimizeButtonValue as? AXUIElement {
             let result = AXUIElementPerformAction(minimizeButton, kAXPressAction as CFString)
 
             if result == .success {
