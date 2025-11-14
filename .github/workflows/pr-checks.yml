@@ -7,7 +7,7 @@ on:
 jobs:
   pr-validation:
     name: PR Validation
-    runs-on: macos-13
+    runs-on: macos-14
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -53,7 +53,7 @@ jobs:
 
   test-coverage-diff:
     name: Test Coverage Diff
-    runs-on: macos-13
+    runs-on: macos-14
     steps:
       - name: Checkout PR branch
         uses: actions/checkout@v5
