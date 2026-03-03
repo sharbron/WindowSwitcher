@@ -249,7 +249,7 @@ class WindowManager: ObservableObject {
     }
 
     func activateWindow(_ window: WindowInfo) {
-        logger.info("Attempting to activate window: \(window.title) from app: \(window.appName), ID: \(window.id)")
+        logger.debug("Attempting to activate window: \(window.title) from app: \(window.appName), ID: \(window.id)")
 
         // Record this activation for recency tracking
         recordWindowActivation(window.id)
@@ -443,7 +443,7 @@ class WindowManager: ObservableObject {
         if titleMatches.count > 1 {
             return findClosestByPosition(titleMatches, to: targetBounds)
         } else if titleMatches.count == 1 {
-            logger.info("Matched window by title: \(targetTitle)")
+            logger.debug("Matched window by title")
             return titleMatches.first
         }
 
@@ -496,7 +496,7 @@ class WindowManager: ObservableObject {
         )
 
         if raiseResult == .success && frontmostResult == .success && focusResult == .success {
-            logger.info("Successfully activated window: \(windowInfo.title)")
+            logger.debug("Successfully activated window")
         } else {
             logger.warning(
                 """
