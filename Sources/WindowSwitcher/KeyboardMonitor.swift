@@ -3,8 +3,20 @@ import Carbon
 import os.log
 
 class KeyboardMonitor: ObservableObject {
-    @Published var isShowingSwitcher = false
-    @Published var selectedIndex = 0
+    // Accessed from both the event tap thread and main thread — always guarded by stateLock
+    private var _isShowingSwitcher = false
+    var isShowingSwitcher: Bool {
+        get {
+            stateLock.lock()
+            defer { stateLock.unlock() }
+            return _isShowingSwitcher
+        }
+        set {
+            stateLock.lock()
+            defer { stateLock.unlock() }
+            _isShowingSwitcher = newValue
+        }
+    }
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
@@ -56,7 +68,9 @@ class KeyboardMonitor: ObservableObject {
             CGEvent.tapEnable(tap: eventTap, enable: false)
         }
         if let runLoopSource = runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
+            // Use CFRunLoopGetMain() — the source was added to the main run loop in startMonitoring()
+            // Using CFRunLoopGetCurrent() here would fail if called from a non-main thread (e.g. deinit)
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
         }
     }
 
@@ -94,7 +108,7 @@ class KeyboardMonitor: ObservableObject {
             if keyCode == 48 && flags.contains(.maskCommand) {
                 stateLock.lock()
                 tabKeyWasPressed = true
-                let switcherShowing = isShowingSwitcher
+                let switcherShowing = _isShowingSwitcher
                 stateLock.unlock()
 
                 logger.info("Cmd+Tab detected. isShowingSwitcher=\(switcherShowing), hasShift=\(flags.contains(.maskShift))")
@@ -119,7 +133,7 @@ class KeyboardMonitor: ObservableObject {
 
             // Escape key (keycode 53) - dismiss switcher if showing
             stateLock.lock()
-            let switcherShowing = isShowingSwitcher
+            let switcherShowing = _isShowingSwitcher
             stateLock.unlock()
 
             if keyCode == 53 && switcherShowing {

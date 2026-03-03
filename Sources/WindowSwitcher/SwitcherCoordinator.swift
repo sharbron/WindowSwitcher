@@ -59,6 +59,7 @@ class SwitcherCoordinator: ObservableObject {
 
         guard !updatedWindows.isEmpty else {
             logger.warning("No windows available to display")
+            windowManager.stopCacheRefresh()
             return
         }
 

@@ -10,14 +10,24 @@ class AppState: ObservableObject {
     var aboutWindow: NSWindow?
     var preferencesWindow: NSWindow?
 
+    // Stored observer tokens — must be kept to avoid leaking observers
+    private var aboutWindowObserver: NSObjectProtocol?
+    private var preferencesWindowObserver: NSObjectProtocol?
+
     func openAboutWindow() {
-        if aboutWindow == nil || !aboutWindow!.isVisible {
-            let window = createWindow(
+        if aboutWindow == nil || aboutWindow?.isVisible == false {
+            // Remove previous observer before creating a new window
+            if let observer = aboutWindowObserver {
+                NotificationCenter.default.removeObserver(observer)
+            }
+            let (window, observer) = createWindow(
                 title: "About Window Switcher",
                 view: AboutView(),
-                size: NSSize(width: 420, height: 540)
+                size: NSSize(width: 420, height: 540),
+                onClose: { [weak self] in self?.isAboutWindowOpen = false }
             )
             aboutWindow = window
+            aboutWindowObserver = observer
             isAboutWindowOpen = true
         } else {
             aboutWindow?.makeKeyAndOrderFront(nil)
@@ -26,13 +36,19 @@ class AppState: ObservableObject {
     }
 
     func openPreferencesWindow() {
-        if preferencesWindow == nil || !preferencesWindow!.isVisible {
-            let window = createWindow(
+        if preferencesWindow == nil || preferencesWindow?.isVisible == false {
+            // Remove previous observer before creating a new window
+            if let observer = preferencesWindowObserver {
+                NotificationCenter.default.removeObserver(observer)
+            }
+            let (window, observer) = createWindow(
                 title: "Window Switcher Preferences",
                 view: PreferencesView(),
-                size: NSSize(width: 600, height: 650)
+                size: NSSize(width: 600, height: 650),
+                onClose: { [weak self] in self?.isPreferencesWindowOpen = false }
             )
             preferencesWindow = window
+            preferencesWindowObserver = observer
             isPreferencesWindowOpen = true
         } else {
             preferencesWindow?.makeKeyAndOrderFront(nil)
@@ -43,8 +59,9 @@ class AppState: ObservableObject {
     private func createWindow<Content: View>(
         title: String,
         view: Content,
-        size: NSSize
-    ) -> NSWindow {
+        size: NSSize,
+        onClose: @escaping () -> Void
+    ) -> (NSWindow, NSObjectProtocol) {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: size.width, height: size.height),
             styleMask: [.titled, .closable, .miniaturizable],
@@ -59,22 +76,15 @@ class AppState: ObservableObject {
         NSApp.activate(ignoringOtherApps: true)
         window.isReleasedWhenClosed = false
 
-        // Handle window close
-        NotificationCenter.default.addObserver(
+        // Store the returned token so the observer can be properly removed later
+        let observer = NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification,
             object: window,
             queue: .main
-        ) { [weak self] _ in
-            guard let self = self else { return }
-            MainActor.assumeIsolated {
-                if window == self.aboutWindow {
-                    self.isAboutWindowOpen = false
-                } else if window == self.preferencesWindow {
-                    self.isPreferencesWindowOpen = false
-                }
-            }
+        ) { _ in
+            MainActor.assumeIsolated { onClose() }
         }
 
-        return window
+        return (window, observer)
     }
 }
