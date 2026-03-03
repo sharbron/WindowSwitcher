@@ -58,3 +58,8 @@ iOSInjectionProject/
 
 # macOS
 .DS_Store
+
+# Build outputs
+*.app
+*.dmg
+generate_icon.swift
