@@ -39,6 +39,12 @@ cp .build/release/$APP_NAME "$APP_DIR/MacOS/"
 # Copy Info.plist
 cp Sources/WindowSwitcher/Info.plist "$APP_DIR/"
 
+# Copy app icon
+if [ -f "Sources/WindowSwitcher/AppIcon.icns" ]; then
+    echo "Copying app icon..."
+    cp Sources/WindowSwitcher/AppIcon.icns "$APP_DIR/Resources/"
+fi
+
 # Copy entitlements if needed (for reference, not used in unsigned builds)
 if [ -f "Sources/WindowSwitcher/WindowSwitcher.entitlements" ]; then
     cp Sources/WindowSwitcher/WindowSwitcher.entitlements "$APP_DIR/Resources/"

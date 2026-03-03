@@ -22,40 +22,60 @@ struct WindowSwitcherView: View {
         return Array(windows.prefix(maxCount))
     }
 
+    // Pre-compute window numbers to avoid O(n²) performance issue
+    private var windowNumbers: [CGWindowID: Int] {
+        var numbers: [CGWindowID: Int] = [:]
+        var appCounts: [String: Int] = [:]
+
+        // First pass: count windows per app
+        for window in displayWindows {
+            appCounts[window.appName, default: 0] += 1
+        }
+
+        // Second pass: assign numbers only if multiple windows from same app
+        var appIndices: [String: Int] = [:]
+        for window in displayWindows where appCounts[window.appName, default: 0] > 1 {
+            let index = appIndices[window.appName, default: 0]
+            numbers[window.id] = index + 1
+            appIndices[window.appName] = index + 1
+        }
+
+        return numbers
+    }
+
     var body: some View {
         ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 20) {
-                    ForEach(Array(displayWindows.enumerated()), id: \.element.id) { index, window in
-                        WindowThumbnailView(
-                            window: window,
-                            isSelected: index == selectedIndex,
-                            thumbnailWidth: thumbnailWidth,
-                            thumbnailHeight: thumbnailHeight,
-                            windowNumber: getWindowNumber(for: window, at: index)
-                        )
-                        .id(window.id)
-                        .onTapGesture {
-                            onSelect(window)
+            ZStack {
+                // Background with rounded corners - behind everything
+                VisualEffectBlur(material: .menu, blendingMode: .behindWindow, cornerRadius: 20)
+                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+
+                // Content on top
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 20) {
+                        ForEach(Array(displayWindows.enumerated()), id: \.element.id) { index, window in
+                            WindowThumbnailView(
+                                window: window,
+                                isSelected: index == selectedIndex,
+                                thumbnailWidth: thumbnailWidth,
+                                thumbnailHeight: thumbnailHeight,
+                                windowNumber: windowNumbers[window.id]
+                            )
+                            .id(window.id)
+                            .onTapGesture {
+                                onSelect(window)
+                            }
                         }
                     }
+                    .padding(32)
                 }
-                .padding(32)
             }
             .frame(maxWidth: maxSwitcherWidth)
-            .background(
-                ZStack {
-                    RoundedRectangle(cornerRadius: 20)
-                        .fill(Color(NSColor.controlBackgroundColor).opacity(0.95))
-
-                    VisualEffectBlur(material: .menu, blendingMode: .withinWindow, cornerRadius: 20)
-                        .opacity(0.8)
-                }
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 20))
-            .shadow(color: .black.opacity(0.3), radius: 20, x: 0, y: 10)
+            .compositingGroup()
+            .shadow(color: .black.opacity(0.6), radius: 50, x: 0, y: 15)
             .onChange(of: selectedIndex) { newIndex in
                 if newIndex < displayWindows.count {
+                    // Scroll immediately without delay to prevent queuing issues
                     withAnimation(.easeInOut(duration: 0.2)) {
                         proxy.scrollTo(displayWindows[newIndex].id, anchor: .center)
                     }
@@ -63,6 +83,7 @@ struct WindowSwitcherView: View {
             }
             .onAppear {
                 if selectedIndex < displayWindows.count {
+                    // Initial scroll without animation or delay
                     proxy.scrollTo(displayWindows[selectedIndex].id, anchor: .center)
                 }
             }
@@ -73,18 +94,6 @@ struct WindowSwitcherView: View {
         // Get screen width and limit switcher to 90% of screen width
         guard let screen = NSScreen.main else { return 1200 }
         return screen.visibleFrame.width * 0.9
-    }
-
-    private func getWindowNumber(for window: WindowInfo, at index: Int) -> Int? {
-        // Count how many windows from the same app come before this one
-        let sameAppWindows = displayWindows.filter { $0.appName == window.appName }
-        if sameAppWindows.count > 1 {
-            // Return 1-based index within same app
-            if let windowIndex = sameAppWindows.firstIndex(where: { $0.id == window.id }) {
-                return windowIndex + 1
-            }
-        }
-        return nil
     }
 }
 
@@ -101,16 +110,18 @@ struct WindowThumbnailView: View {
         VStack(spacing: 12) {
             // Window Thumbnail
             ZStack {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color(NSColor.controlBackgroundColor))
+                // Blurred background for thumbnail (clipped to rounded rect)
+                VisualEffectBlur(material: .hudWindow, blendingMode: .behindWindow, cornerRadius: 8)
                     .frame(width: thumbnailWidth, height: thumbnailHeight)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
 
                 if let thumbnail = window.thumbnail {
                     Image(nsImage: thumbnail)
                         .resizable()
-                        .aspectRatio(contentMode: .fit)
+                        .scaledToFit()
                         .frame(width: thumbnailWidth, height: thumbnailHeight)
-                        .cornerRadius(8)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .padding(isUsingAppIconsMode() ? 16 : 0)
                 } else {
                     VStack {
                         Image(systemName: "hourglass")
@@ -120,6 +131,7 @@ struct WindowThumbnailView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
+                    .frame(width: thumbnailWidth, height: thumbnailHeight)
                 }
 
                 // App icon overlay in bottom-left corner (only when showing window previews)
@@ -129,6 +141,7 @@ struct WindowThumbnailView: View {
                         HStack {
                             Image(nsImage: appIcon)
                                 .resizable()
+                                .scaledToFit()
                                 .frame(width: 32, height: 32)
                                 .background(
                                     RoundedRectangle(cornerRadius: 6)
@@ -142,6 +155,8 @@ struct WindowThumbnailView: View {
                     }
                 }
             }
+            .frame(width: thumbnailWidth, height: thumbnailHeight)
+            .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
                     .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 3)
@@ -167,9 +182,14 @@ struct WindowThumbnailView: View {
                             .font(.system(size: 12))
                             .foregroundColor(.secondary)
                             .lineLimit(1)
+                    } else {
+                        // Empty text to maintain consistent height
+                        Text(" ")
+                            .font(.system(size: 12))
+                            .lineLimit(1)
                     }
                 }
-                .frame(width: thumbnailWidth)
+                .frame(width: thumbnailWidth, height: 36, alignment: .top)
             }
         }
         .padding(16)
@@ -208,15 +228,6 @@ class SwitcherWindow: NSWindow {
         self.ignoresMouseEvents = false
         self.hasShadow = false // Disable window shadow - we use view-level shadow instead
         self.titlebarAppearsTransparent = true
-
-        // Ensure the content view is transparent and uses rounded corners
-        if let contentView = self.contentView {
-            contentView.wantsLayer = true
-            contentView.layer?.backgroundColor = NSColor.clear.cgColor
-            contentView.layer?.cornerRadius = 20
-            contentView.layer?.cornerCurve = .continuous
-            contentView.layer?.masksToBounds = true
-        }
     }
 
     /// Centers the window on the main screen, both horizontally and vertically
@@ -253,8 +264,8 @@ struct VisualEffectBlur: NSViewRepresentable {
         if let layer = view.layer {
             layer.cornerRadius = cornerRadius
             layer.masksToBounds = true
-            layer.cornerCurve = .continuous // Smoother, more natural corners
-            layer.allowsEdgeAntialiasing = true // Enable anti-aliasing for smooth edges
+            layer.cornerCurve = .continuous
+            layer.allowsEdgeAntialiasing = true
         }
 
         return view

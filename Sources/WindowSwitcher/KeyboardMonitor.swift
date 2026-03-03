@@ -94,15 +94,21 @@ class KeyboardMonitor: ObservableObject {
             if keyCode == 48 && flags.contains(.maskCommand) {
                 stateLock.lock()
                 tabKeyWasPressed = true
+                let switcherShowing = isShowingSwitcher
                 stateLock.unlock()
+
+                logger.info("Cmd+Tab detected. isShowingSwitcher=\(switcherShowing), hasShift=\(flags.contains(.maskShift))")
 
                 DispatchQueue.main.async {
                     if flags.contains(.maskShift) {
+                        self.logger.info("Calling onShiftTabPressed")
                         self.onShiftTabPressed?()
                     } else {
-                        if !self.isShowingSwitcher {
+                        if !switcherShowing {
+                            self.logger.info("Calling onCmdTabPressed (switcher not showing)")
                             self.onCmdTabPressed?()
                         } else {
+                            self.logger.info("Calling onTabPressed (switcher already showing)")
                             self.onTabPressed?()
                         }
                     }
@@ -112,7 +118,11 @@ class KeyboardMonitor: ObservableObject {
             }
 
             // Escape key (keycode 53) - dismiss switcher if showing
-            if keyCode == 53 && isShowingSwitcher {
+            stateLock.lock()
+            let switcherShowing = isShowingSwitcher
+            stateLock.unlock()
+
+            if keyCode == 53 && switcherShowing {
                 stateLock.lock()
                 cmdKeyIsDown = false
                 tabKeyWasPressed = false

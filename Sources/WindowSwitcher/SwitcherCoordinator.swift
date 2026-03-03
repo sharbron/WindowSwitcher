@@ -10,6 +10,7 @@ class SwitcherCoordinator: ObservableObject {
     private let windowManager = WindowManager()
     private let keyboardMonitor = KeyboardMonitor()
     private var switcherWindow: NSWindow?
+    private var hostingController: NSHostingController<WindowSwitcherView>?
     private let logger = Logger(subsystem: "com.windowswitcher", category: "SwitcherCoordinator")
 
     init() {
@@ -41,7 +42,16 @@ class SwitcherCoordinator: ObservableObject {
     }
 
     private func showSwitcher() {
+        // If switcher is already showing, don't show it again (user is holding Cmd)
+        if isShowingSwitcher {
+            logger.info("Switcher already showing, ignoring duplicate show request")
+            return
+        }
+
         logger.info("Showing switcher")
+
+        // Start thumbnail caching while switcher is visible
+        windowManager.startCacheRefresh()
 
         // Refresh window list
         windowManager.refreshWindows()
@@ -99,21 +109,38 @@ class SwitcherCoordinator: ObservableObject {
 
         guard let window = switcherWindow else { return }
 
-        let hostingController = NSHostingController(
-            rootView: WindowSwitcherView(
+        // Create hosting controller once if it doesn't exist
+        if hostingController == nil {
+            hostingController = NSHostingController(
+                rootView: WindowSwitcherView(
+                    windows: windows,
+                    selectedIndex: selectedIndex,
+                    onSelect: { [weak self] selectedWindow in
+                        self?.activateWindow(selectedWindow)
+                    }
+                )
+            )
+            window.contentViewController = hostingController
+        } else {
+            // Update existing hosting controller's root view
+            hostingController?.rootView = WindowSwitcherView(
                 windows: windows,
                 selectedIndex: selectedIndex,
                 onSelect: { [weak self] selectedWindow in
                     self?.activateWindow(selectedWindow)
                 }
             )
-        )
+        }
 
-        window.contentViewController = hostingController
+        // Calculate and set window size - limit to 90% of screen width
+        guard let screen = NSScreen.main else { return }
+        let screenWidth = screen.visibleFrame.width
+        let maxWidth = screenWidth * 0.9
+        let contentSize = hostingController?.view.fittingSize ?? NSSize(width: 800, height: 400)
+        let windowWidth = min(contentSize.width, maxWidth)
+        let windowHeight = contentSize.height
 
-        // Update window size based on content and center
-        let contentSize = hostingController.view.fittingSize
-        window.setContentSize(contentSize)
+        window.setContentSize(NSSize(width: windowWidth, height: windowHeight))
 
         // Center the window on screen (both horizontally and vertically)
         if let switcherWindow = window as? SwitcherWindow {
@@ -126,42 +153,37 @@ class SwitcherCoordinator: ObservableObject {
     }
 
     private func selectNext() {
+        logger.info("selectNext called, isShowingSwitcher: \(self.isShowingSwitcher)")
         guard !windows.isEmpty else { return }
         selectedIndex = (selectedIndex + 1) % windows.count
+        logger.info("Advanced to window index: \(self.selectedIndex)")
         updateSwitcherView()
     }
 
     private func selectPrevious() {
+        logger.info("selectPrevious called, isShowingSwitcher: \(self.isShowingSwitcher)")
         guard !windows.isEmpty else { return }
         selectedIndex = (selectedIndex - 1 + windows.count) % windows.count
+        logger.info("Went back to window index: \(self.selectedIndex)")
         updateSwitcherView()
     }
 
     private func updateSwitcherView() {
-        guard let window = switcherWindow else { return }
+        guard hostingController != nil else { return }
 
-        let hostingController = NSHostingController(
-            rootView: WindowSwitcherView(
-                windows: windows,
-                selectedIndex: selectedIndex,
-                onSelect: { [weak self] selectedWindow in
-                    self?.activateWindow(selectedWindow)
-                }
-            )
+        // Reuse existing hosting controller - just update the root view
+        // This prevents memory leaks from creating new controllers every Tab press
+        hostingController?.rootView = WindowSwitcherView(
+            windows: windows,
+            selectedIndex: selectedIndex,
+            onSelect: { [weak self] selectedWindow in
+                self?.activateWindow(selectedWindow)
+            }
         )
 
-        window.contentViewController = hostingController
-
-        // Re-center after content update
-        let contentSize = hostingController.view.fittingSize
-        window.setContentSize(contentSize)
-
-        // Center the window on screen (both horizontally and vertically)
-        if let switcherWindow = window as? SwitcherWindow {
-            switcherWindow.centerOnScreen()
-        } else {
-            window.center()
-        }
+        // Don't resize window when just changing selection - keep the same size
+        // This prevents shaking/jittering when cycling through windows
+        // The scroll view will handle showing the selected window
     }
 
     private func activateSelectedWindow() {
@@ -184,6 +206,10 @@ class SwitcherCoordinator: ObservableObject {
         isShowingSwitcher = false
         keyboardMonitor.isShowingSwitcher = false
         switcherWindow?.orderOut(nil)
+        // Clear hosting controller to free memory when switcher is hidden
+        hostingController = nil
+        // Stop thumbnail caching when switcher is hidden
+        windowManager.stopCacheRefresh()
     }
 
     deinit {

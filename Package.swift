@@ -19,6 +19,9 @@ let package = Package(
             exclude: [
                 "Info.plist",
                 "WindowSwitcher.entitlements"
+            ],
+            resources: [
+                .copy("AppIcon.icns")
             ]
         )
     ]
