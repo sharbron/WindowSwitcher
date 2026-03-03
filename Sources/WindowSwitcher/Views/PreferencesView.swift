@@ -221,9 +221,8 @@ struct PreferencesView: View {
     }
 
     private func openAccessibilityPreferences() {
-        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") else {
-            return
-        }
+        let urlString = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+        guard let url = URL(string: urlString) else { return }
         NSWorkspace.shared.open(url)
     }
 
