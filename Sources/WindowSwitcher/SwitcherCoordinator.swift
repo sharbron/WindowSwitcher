@@ -6,6 +6,7 @@ class SwitcherCoordinator: ObservableObject {
     @Published var windows: [WindowInfo] = []
     @Published var selectedIndex = 0
     @Published var isShowingSwitcher = false
+    @Published var searchQuery = ""
 
     private let windowManager = WindowManager()
     private let keyboardMonitor = KeyboardMonitor()
@@ -38,6 +39,18 @@ class SwitcherCoordinator: ObservableObject {
             self?.hideSwitcher()
         }
 
+        keyboardMonitor.onCharacterTyped = { [weak self] character in
+            self?.handleCharacterInput(character)
+        }
+
+        keyboardMonitor.onBackspacePressed = { [weak self] in
+            self?.handleBackspace()
+        }
+
+        keyboardMonitor.onNumberPressed = { [weak self] number in
+            self?.handleNumberKey(number)
+        }
+
         keyboardMonitor.startMonitoring()
     }
 
@@ -52,6 +65,9 @@ class SwitcherCoordinator: ObservableObject {
 
         // Start thumbnail caching while switcher is visible
         windowManager.startCacheRefresh()
+
+        // Reset search query
+        searchQuery = ""
 
         // Refresh window list
         windowManager.refreshWindows()
@@ -118,6 +134,13 @@ class SwitcherCoordinator: ObservableObject {
                     selectedIndex: selectedIndex,
                     onSelect: { [weak self] selectedWindow in
                         self?.activateWindow(selectedWindow)
+                    },
+                    searchQuery: searchQuery,
+                    onCloseWindow: { [weak self] window in
+                        self?.closeWindow(window)
+                    },
+                    onMinimizeWindow: { [weak self] window in
+                        self?.minimizeWindow(window)
                     }
                 )
             )
@@ -129,6 +152,13 @@ class SwitcherCoordinator: ObservableObject {
                 selectedIndex: selectedIndex,
                 onSelect: { [weak self] selectedWindow in
                     self?.activateWindow(selectedWindow)
+                },
+                searchQuery: searchQuery,
+                onCloseWindow: { [weak self] window in
+                    self?.closeWindow(window)
+                },
+                onMinimizeWindow: { [weak self] window in
+                    self?.minimizeWindow(window)
                 }
             )
         }
@@ -179,6 +209,13 @@ class SwitcherCoordinator: ObservableObject {
             selectedIndex: selectedIndex,
             onSelect: { [weak self] selectedWindow in
                 self?.activateWindow(selectedWindow)
+            },
+            searchQuery: searchQuery,
+            onCloseWindow: { [weak self] window in
+                self?.closeWindow(window)
+            },
+            onMinimizeWindow: { [weak self] window in
+                self?.minimizeWindow(window)
             }
         )
 
@@ -206,11 +243,92 @@ class SwitcherCoordinator: ObservableObject {
         logger.info("Hiding switcher")
         isShowingSwitcher = false
         keyboardMonitor.isShowingSwitcher = false
+        searchQuery = "" // Reset search on hide
         switcherWindow?.orderOut(nil)
         // Clear hosting controller to free memory when switcher is hidden
         hostingController = nil
         // Stop thumbnail caching when switcher is hidden
         windowManager.stopCacheRefresh()
+    }
+
+    // MARK: - Search Handling
+
+    private func handleCharacterInput(_ character: String) {
+        guard isShowingSwitcher else { return }
+
+        // Ignore non-alphanumeric characters and spaces
+        let allowedCharacters = CharacterSet.alphanumerics.union(CharacterSet.whitespaces)
+        guard character.unicodeScalars.allSatisfy({ allowedCharacters.contains($0) }) else {
+            return
+        }
+
+        searchQuery += character
+        selectedIndex = 0 // Reset to first filtered window
+        updateSwitcherView()
+        logger.debug("Search query updated: \(self.searchQuery)")
+    }
+
+    private func handleBackspace() {
+        guard isShowingSwitcher, !searchQuery.isEmpty else { return }
+
+        searchQuery.removeLast()
+        selectedIndex = 0 // Reset to first filtered window
+        updateSwitcherView()
+        logger.debug("Search query after backspace: \(self.searchQuery)")
+    }
+
+    // MARK: - Direct Window Access
+
+    private func handleNumberKey(_ number: Int) {
+        guard isShowingSwitcher else { return }
+        guard number >= 0 && number < windows.count else {
+            logger.warning("Number key \(number + 1) pressed but only \(self.windows.count) windows available")
+            return
+        }
+
+        logger.info("Activating window \(number + 1) via number key")
+        let targetWindow = windows[number]
+        activateWindow(targetWindow)
+    }
+
+    // MARK: - Window Actions
+
+    private func closeWindow(_ window: WindowInfo) {
+        logger.info("Closing window: \(window.title)")
+
+        windowManager.closeWindow(window)
+
+        // Remove from list and update view
+        windows.removeAll { $0.id == window.id }
+
+        if windows.isEmpty {
+            hideSwitcher()
+        } else {
+            // Adjust selected index if needed
+            if selectedIndex >= windows.count {
+                selectedIndex = windows.count - 1
+            }
+            updateSwitcherView()
+        }
+    }
+
+    private func minimizeWindow(_ window: WindowInfo) {
+        logger.info("Minimizing window: \(window.title)")
+
+        windowManager.minimizeWindow(window)
+
+        // Remove from list and update view
+        windows.removeAll { $0.id == window.id }
+
+        if windows.isEmpty {
+            hideSwitcher()
+        } else {
+            // Adjust selected index if needed
+            if selectedIndex >= windows.count {
+                selectedIndex = windows.count - 1
+            }
+            updateSwitcherView()
+        }
     }
 
     deinit {

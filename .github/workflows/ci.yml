@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, develop, "claude/**" ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  lint:
+    name: SwiftLint
+    runs-on: macos-14
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Install SwiftLint
+        run: brew install swiftlint
+
+      - name: Run SwiftLint
+        run: swiftlint
+
+  build-and-test:
+    name: Build and Test
+    runs-on: macos-14
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Show Xcode version
+        run: |
+          xcodebuild -version
+          xcrun --show-sdk-path
+
+      - name: Show Swift version
+        run: swift --version
+
+      - name: Build Debug
+        run: swift build -c debug
+
+      - name: Run Tests
+        run: swift test --parallel
+
+      - name: Build Release
+        run: swift build -c release
+
+      - name: Create App Bundle
+        run: ./create_app.sh
+
+      - name: Verify App Bundle
+        run: |
+          if [ ! -d "WindowSwitcher.app" ]; then
+            echo "Error: WindowSwitcher.app not created"
+            exit 1
+          fi
+          echo "App bundle created successfully"
+          ls -lh WindowSwitcher.app/Contents/MacOS/WindowSwitcher
+
+      - name: Upload App Bundle
+        uses: actions/upload-artifact@v5
+        if: success()
+        with:
+          name: WindowSwitcher-${{ github.sha }}
+          path: WindowSwitcher.app/
+          retention-days: 7
+
+  test-coverage:
+    name: Test Coverage Report
+    runs-on: macos-14
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Run Tests with Coverage
+        run: swift test --enable-code-coverage
+
+      - name: Generate Coverage Report
+        continue-on-error: true
+        run: |
+          xcrun llvm-cov export \
+            .build/debug/WindowSwitcherPackageTests.xctest/Contents/MacOS/WindowSwitcherPackageTests \
+            -instr-profile=.build/debug/codecov/default.profdata \
+            -format=lcov > coverage.lcov || echo "Coverage export failed (non-critical)"
+
+      - name: Display Coverage Summary
+        continue-on-error: true
+        run: |
+          if [ -f coverage.lcov ]; then
+            echo "Coverage report generated"
+            echo "Total lines covered:"
+            grep -c "^DA:" coverage.lcov || echo "0"
+          else
+            echo "No coverage report generated"
+          fi

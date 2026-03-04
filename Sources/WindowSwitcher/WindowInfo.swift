@@ -29,29 +29,43 @@ class WindowManager: ObservableObject {
 
     // Track window activation order for recency sorting
     private var windowActivationOrder: [CGWindowID] = []
+    private let activationLock = NSLock()
     private let maxActivationHistorySize = 50
-    private let activationOrderLock = NSLock()
 
-    init() {
+    // UserDefaults instance for testing/dependency injection
+    private let userDefaults: UserDefaults
+
+    init(userDefaults: UserDefaults = .standard) {
+        self.userDefaults = userDefaults
         loadActivationHistory()
     }
 
     private func loadActivationHistory() {
         // Load previously saved activation order
-        if let saved = UserDefaults.standard.array(forKey: "windowActivationOrder") as? [UInt32] {
+        if let saved = userDefaults.array(forKey: "windowActivationOrder") as? [UInt32] {
+            activationLock.lock()
             windowActivationOrder = saved.map { CGWindowID($0) }
+            activationLock.unlock()
         }
     }
 
     private func saveActivationHistory() {
         // Save activation order for persistence across app restarts
+        activationLock.lock()
         let orderToSave = windowActivationOrder.map { UInt32($0) }
-        UserDefaults.standard.set(orderToSave, forKey: "windowActivationOrder")
+        activationLock.unlock()
+
+        userDefaults.set(orderToSave, forKey: "windowActivationOrder")
+    }
+
+    /// Synchronously save activation history (for testing)
+    func flushActivationHistory() {
+        saveActivationHistory()
     }
 
     func recordWindowActivation(_ windowID: CGWindowID) {
-        activationOrderLock.lock()
-        defer { activationOrderLock.unlock() }
+        // Protect array access with lock
+        activationLock.lock()
 
         // Remove if already in list
         windowActivationOrder.removeAll { $0 == windowID }
@@ -61,7 +75,16 @@ class WindowManager: ObservableObject {
         if windowActivationOrder.count > maxActivationHistorySize {
             windowActivationOrder = Array(windowActivationOrder.prefix(maxActivationHistorySize))
         }
-        saveActivationHistory()
+
+        // Create snapshot for saving (outside critical section)
+        let orderToSave = windowActivationOrder.map { UInt32($0) }
+        activationLock.unlock()
+
+        // Save asynchronously to avoid blocking
+        // Capture userDefaults directly to ensure save always happens
+        DispatchQueue.global(qos: .utility).async { [userDefaults = self.userDefaults] in
+            userDefaults.set(orderToSave, forKey: "windowActivationOrder")
+        }
     }
 
     deinit {
@@ -75,7 +98,6 @@ class WindowManager: ObservableObject {
         guard !isCacheRefreshActive else { return }
         isCacheRefreshActive = true
 
-        // Start refreshing on main thread (every 2 seconds only when switcher is shown)
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             self.cacheRefreshTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
@@ -108,8 +130,6 @@ class WindowManager: ObservableObject {
                 return
             }
 
-            // Build set of valid window IDs currently on screen
-            var validWindowIDs = Set<CGWindowID>()
             var newCache: [CGWindowID: NSImage] = [:]
 
             for windowInfo in windowInfoList {
@@ -119,8 +139,6 @@ class WindowManager: ObservableObject {
                       layer == 0 else {
                     continue
                 }
-
-                validWindowIDs.insert(windowID)
 
                 // Create a minimal WindowInfo for thumbnail capture
                 let tempWindow = WindowInfo(
@@ -141,11 +159,9 @@ class WindowManager: ObservableObject {
             }
 
             // Update cache on main thread
-            // Only keep thumbnails for windows that still exist to prevent memory leak
             DispatchQueue.main.async {
-                let prunedCount = self.thumbnailCache.count - newCache.count
                 self.thumbnailCache = newCache
-                self.logger.debug("Cache updated: \(newCache.count) entries (pruned \(prunedCount))")
+                self.logger.debug("Thumbnail cache updated with \(newCache.count) entries")
             }
         }
     }
@@ -154,30 +170,31 @@ class WindowManager: ObservableObject {
         // Get visible windows via CoreGraphics
         var windowList = getWindowsViaCoreGraphics()
 
-        // Reverse the list because CoreGraphics returns in ascending z-order (background first)
-        // but we want descending z-order (foreground/most recent first)
-        windowList.reverse()
+        // Create a thread-safe snapshot of activation order for sorting
+        activationLock.lock()
+        let activationOrderSnapshot = windowActivationOrder
+        activationLock.unlock()
 
-        activationOrderLock.lock()
-        defer { activationOrderLock.unlock() }
-
-        // FIRST: Record any new windows at the FRONT of activation order (they are most recent)
-        // Do this BEFORE sorting so the sort uses the updated activation order
-        var newWindows: [CGWindowID] = []
-        for window in windowList where !windowActivationOrder.contains(window.id) {
-            newWindows.append(window.id)
-        }
-        // Insert new windows at the front (in reverse order to maintain their relative order)
-        for newWindowID in newWindows.reversed() {
-            windowActivationOrder.insert(newWindowID, at: 0)
-        }
-        saveActivationHistory()
-
-        // THEN: Sort windows by their position in activation order (recency)
+        // Sort windows by recency (most recently activated first)
         windowList.sort { lhs, rhs in
-            let lhsIndex = windowActivationOrder.firstIndex(of: lhs.id) ?? Int.max
-            let rhsIndex = windowActivationOrder.firstIndex(of: rhs.id) ?? Int.max
-            return lhsIndex < rhsIndex
+            let lhsIndex = activationOrderSnapshot.firstIndex(of: lhs.id) ?? Int.max
+            let rhsIndex = activationOrderSnapshot.firstIndex(of: rhs.id) ?? Int.max
+
+            // Lower index = more recent (comes first)
+            if lhsIndex != rhsIndex {
+                return lhsIndex < rhsIndex
+            }
+
+            // If neither has activation history, prioritize windows with titles
+            let lhsHasTitle = !lhs.title.isEmpty
+            let rhsHasTitle = !rhs.title.isEmpty
+
+            if lhsHasTitle != rhsHasTitle {
+                return lhsHasTitle
+            }
+
+            // Finally sort by app name
+            return lhs.appName.localizedCaseInsensitiveCompare(rhs.appName) == .orderedAscending
         }
 
         self.windows = windowList
@@ -249,254 +266,142 @@ class WindowManager: ObservableObject {
     }
 
     func activateWindow(_ window: WindowInfo) {
-        logger.debug("Attempting to activate window: \(window.title) from app: \(window.appName), ID: \(window.id)")
+        logger.info("Attempting to activate window: \(window.title) from app: \(window.appName)")
 
         // Record this activation for recency tracking
         recordWindowActivation(window.id)
 
-        // Get the application
-        guard let app = NSRunningApplication(processIdentifier: window.ownerPID) else {
-            logger.error("Failed to get NSRunningApplication for PID: \(window.ownerPID)")
+        // Get the running application
+        guard let app = getRunningApp(for: window) else {
             return
         }
 
         // Activate the application first
-        let activateResult = app.activate(options: [.activateIgnoringOtherApps])
-        logger.info("App activation result: \(activateResult)")
+        app.activate(options: [.activateIgnoringOtherApps])
 
-        // Small delay to allow app to become active
-        usleep(100_000) // 100ms
+        // Find and focus the specific window
+        if let axWindow = findAccessibilityWindow(for: window, in: app) {
+            focusWindow(axWindow, for: app, window: window)
+        } else {
+            logger.warning("Could not find matching window for: \(window.title)")
+        }
+    }
 
-        // Try Accessibility API first
-        let appElement = AXUIElementCreateApplication(window.ownerPID)
+    // MARK: - Window Activation Helper Methods
+
+    /// Gets the NSRunningApplication for the given window
+    private func getRunningApp(for window: WindowInfo) -> NSRunningApplication? {
+        guard let app = NSRunningApplication(processIdentifier: window.ownerPID) else {
+            logger.error("Failed to get NSRunningApplication for PID: \(window.ownerPID)")
+            return nil
+        }
+        return app
+    }
+
+    /// Gets the array of accessibility windows for the given application
+    private func getAccessibilityWindows(for app: NSRunningApplication) -> [AXUIElement]? {
+        let appElement = AXUIElementCreateApplication(app.processIdentifier)
         var windowsValue: AnyObject?
 
         let windowsAttr = kAXWindowsAttribute as CFString
-        if AXUIElementCopyAttributeValue(appElement, windowsAttr, &windowsValue) == .success,
-           let axWindows = windowsValue as? [AXUIElement] {
-            logger.info("Found \(axWindows.count) windows in Accessibility API for app")
-            if !axWindows.isEmpty {
-                if let axWindow = findMatchingWindow(axWindows, for: window) {
-                    performWindowActivation(appElement, window: axWindow, for: window)
-                    return
-                }
-            }
+        guard AXUIElementCopyAttributeValue(appElement, windowsAttr, &windowsValue) == .success,
+              let axWindows = windowsValue as? [AXUIElement] else {
+            return nil
         }
 
-        logger.warning(
-            "Accessibility API failed or returned 0 windows. Trying direct CGWindow activation for ID: \(window.id)"
-        )
-        activateWindowDirectly(window)
+        return axWindows
     }
 
-    private func activateWindowDirectly(_ window: WindowInfo) {
-        logger.info("Attempting direct window activation using Accessibility API with focus")
-
-        // Create app element
-        let appElement = AXUIElementCreateApplication(window.ownerPID)
-
-        // Try to set focus on the app itself, which might help enumerate windows
-        var focusedWindowValue: AnyObject?
-        let focusedWindowAttr = kAXFocusedWindowAttribute as CFString
-
-        // Try to get the focused window first
-        if AXUIElementCopyAttributeValue(appElement, focusedWindowAttr, &focusedWindowValue) == .success {
-            logger.info("Successfully retrieved focused window attribute")
+    /// Finds the accessibility window element matching the given window info
+    private func findAccessibilityWindow(for window: WindowInfo, in app: NSRunningApplication) -> AXUIElement? {
+        guard let axWindows = getAccessibilityWindows(for: app) else {
+            return nil
         }
 
-        // Try a different approach: iterate through all windows in a different way
-        // Get all windows including the one we're looking for
-        var allWindowsValue: AnyObject?
-        let allWindowsAttr = kAXWindowsAttribute as CFString
-
-        if AXUIElementCopyAttributeValue(appElement, allWindowsAttr, &allWindowsValue) == .success,
-           let allWindows = allWindowsValue as? [AXUIElement] {
-            logger.info("Got \(allWindows.count) windows from AX API")
-
-            // If we get windows, try to find and activate our target
-            for (idx, axWindow) in allWindows.enumerated() {
-                var posValue: AnyObject?
-                let posAttr = kAXPositionAttribute as CFString
-
-                if AXUIElementCopyAttributeValue(axWindow, posAttr, &posValue) == .success {
-                    // Try to raise this window
-                    let raiseResult = AXUIElementPerformAction(axWindow, kAXRaiseAction as CFString)
-                    logger.debug("Window \(idx): Raise result = \(raiseResult.rawValue)")
-
-                    if raiseResult == .success {
-                        logger.info("Successfully raised window \(idx)")
-                        return
-                    }
-                }
-            }
-        } else {
-            logger.warning("Could not access AX windows attribute on second attempt")
+        // First pass: Try to match by bounds (most accurate)
+        if let match = matchWindowByBounds(window, in: axWindows) {
+            logger.info("Matched window by bounds")
+            return match
         }
 
-        // Last resort: just set focus on the app
-        let focusResult = AXUIElementSetAttributeValue(
-            appElement,
-            focusedWindowAttr,
-            focusedWindowValue as CFTypeRef? ?? kCFNull
-        )
-        logger.info("Set app focus result: \(focusResult.rawValue)")
-    }
-
-    private func findMatchingWindow(_ axWindows: [AXUIElement], for window: WindowInfo) -> AXUIElement? {
-        // First pass: Try to match window by CGWindowID (most reliable for Finder)
-        if let matched = matchByWindowID(axWindows, targetID: window.id) {
-            return matched
-        }
-
-        // Second pass: Try to match window by position and size
-        if let matched = matchByBounds(axWindows, targetBounds: window.bounds) {
-            return matched
-        }
-
-        // Third pass: Try to match window by title with position refinement (fallback)
-        if let matched = matchByTitle(axWindows, targetTitle: window.title, targetBounds: window.bounds) {
-            return matched
+        // Second pass: Try to match by title (fallback)
+        if !window.title.isEmpty, let match = matchWindowByTitle(window, in: axWindows) {
+            logger.info("Matched window by title: \(window.title)")
+            return match
         }
 
         return nil
     }
 
-    private func matchByWindowID(_ axWindows: [AXUIElement], targetID: CGWindowID) -> AXUIElement? {
-        logger.info("matchByWindowID: Looking for window ID \(targetID) among \(axWindows.count) AX windows")
-        var foundAnyID = false
+    /// Attempts to match a window by its bounds (position and size)
+    private func matchWindowByBounds(_ window: WindowInfo, in axWindows: [AXUIElement]) -> AXUIElement? {
+        let tolerance: CGFloat = 5.0
 
-        for (index, axWindow) in axWindows.enumerated() {
-            var windowIDValue: AnyObject?
-            let windowIDAttr = kAXWindowAttribute as CFString
-
-            if AXUIElementCopyAttributeValue(axWindow, windowIDAttr, &windowIDValue) == .success,
-               let windowIDNum = windowIDValue as? NSNumber {
-                let axWindowID = CGWindowID(windowIDNum.uint32Value)
-                foundAnyID = true
-                logger.debug("Window \(index): ID=\(axWindowID) (target=\(targetID)), match=\(axWindowID == targetID)")
-                if axWindowID == targetID {
-                    logger.info("✓ Matched window by CGWindowID: \(targetID)")
-                    return axWindow
-                }
-            } else {
-                logger.debug("Window \(index): No AX window ID attribute found")
-            }
-        }
-
-        if foundAnyID {
-            logger.warning("✗ No window matched by ID. Target ID: \(targetID), checked \(axWindows.count) windows")
-        } else {
-            logger.warning("✗ No AX windows had retrievable window IDs. Checked \(axWindows.count) windows")
-        }
-        return nil
-    }
-
-    private func matchByBounds(_ axWindows: [AXUIElement], targetBounds: CGRect) -> AXUIElement? {
-        logger.info("matchByBounds: Looking among \(axWindows.count) AX windows")
-        for (index, axWindow) in axWindows.enumerated() {
+        for axWindow in axWindows {
             var positionValue: AnyObject?
             var sizeValue: AnyObject?
 
             let posAttr = kAXPositionAttribute as CFString
             let sizeAttr = kAXSizeAttribute as CFString
-            if AXUIElementCopyAttributeValue(axWindow, posAttr, &positionValue) == .success,
-               AXUIElementCopyAttributeValue(axWindow, sizeAttr, &sizeValue) == .success,
-               let position = positionValue as? CGPoint,
-               let size = sizeValue as? CGSize {
-                let axBounds = CGRect(origin: position, size: size)
 
-                let xDiff = abs(axBounds.origin.x - targetBounds.origin.x)
-                let yDiff = abs(axBounds.origin.y - targetBounds.origin.y)
-                let wDiff = abs(axBounds.size.width - targetBounds.size.width)
-                let hDiff = abs(axBounds.size.height - targetBounds.size.height)
+            guard AXUIElementCopyAttributeValue(axWindow, posAttr, &positionValue) == .success,
+                  AXUIElementCopyAttributeValue(axWindow, sizeAttr, &sizeValue) == .success,
+                  let position = positionValue as? CGPoint,
+                  let size = sizeValue as? CGSize else {
+                continue
+            }
 
-                logger.debug("Window \(index): diffs x=\(xDiff) y=\(yDiff) w=\(wDiff) h=\(hDiff)")
+            let axBounds = CGRect(origin: position, size: size)
 
-                // Check if bounds match (with small tolerance)
-                if xDiff < 5 && yDiff < 5 && wDiff < 5 && hDiff < 5 {
-                    logger.info("Matched window by bounds")
-                    return axWindow
-                }
-            } else {
-                logger.debug("Window \(index): Could not get AX position or size")
+            // Check if bounds match within tolerance
+            if boundsMatch(axBounds, window.bounds, tolerance: tolerance) {
+                return axWindow
             }
         }
-        logger.warning("No window matched by bounds")
+
         return nil
     }
 
-    private func matchByTitle(_ axWindows: [AXUIElement], targetTitle: String, targetBounds: CGRect) -> AXUIElement? {
-        guard !targetTitle.isEmpty else { return nil }
+    /// Checks if two bounds match within a given tolerance
+    private func boundsMatch(_ bounds1: CGRect, _ bounds2: CGRect, tolerance: CGFloat) -> Bool {
+        return abs(bounds1.origin.x - bounds2.origin.x) < tolerance &&
+               abs(bounds1.origin.y - bounds2.origin.y) < tolerance &&
+               abs(bounds1.size.width - bounds2.size.width) < tolerance &&
+               abs(bounds1.size.height - bounds2.size.height) < tolerance
+    }
 
-        var titleMatches: [AXUIElement] = []
+    /// Attempts to match a window by its title
+    private func matchWindowByTitle(_ window: WindowInfo, in axWindows: [AXUIElement]) -> AXUIElement? {
         for axWindow in axWindows {
             var titleValue: AnyObject?
             let titleAttr = kAXTitleAttribute as CFString
-            if AXUIElementCopyAttributeValue(axWindow, titleAttr, &titleValue) == .success,
-               let axTitle = titleValue as? String,
-               axTitle == targetTitle {
-                titleMatches.append(axWindow)
-            }
-        }
 
-        // If multiple matches, find the one closest in position to our window bounds
-        if titleMatches.count > 1 {
-            return findClosestByPosition(titleMatches, to: targetBounds)
-        } else if titleMatches.count == 1 {
-            logger.debug("Matched window by title")
-            return titleMatches.first
+            guard AXUIElementCopyAttributeValue(axWindow, titleAttr, &titleValue) == .success,
+                  let axTitle = titleValue as? String,
+                  axTitle == window.title else {
+                continue
+            }
+
+            return axWindow
         }
 
         return nil
     }
 
-    private func findClosestByPosition(_ windows: [AXUIElement], to targetBounds: CGRect) -> AXUIElement? {
-        var bestMatch: AXUIElement?
-        var bestDistance: CGFloat = CGFloat.greatestFiniteMagnitude
+    /// Focuses the given accessibility window
+    private func focusWindow(_ axWindow: AXUIElement, for app: NSRunningApplication, window: WindowInfo) {
+        let appElement = AXUIElementCreateApplication(app.processIdentifier)
 
-        for axWindow in windows {
-            var positionValue: AnyObject?
-            let posAttr = kAXPositionAttribute as CFString
-            if AXUIElementCopyAttributeValue(axWindow, posAttr, &positionValue) == .success,
-               let position = positionValue as? CGPoint {
-                let distance = hypot(
-                    position.x - targetBounds.origin.x,
-                    position.y - targetBounds.origin.y
-                )
-                if distance < bestDistance {
-                    bestDistance = distance
-                    bestMatch = axWindow
-                }
-            }
-        }
-
-        if bestMatch != nil {
-            logger.info("Matched window by title with position refinement")
-        }
-        return bestMatch
-    }
-
-    private func performWindowActivation(
-        _ appElement: AXUIElement,
-        window axWindow: AXUIElement,
-        for windowInfo: WindowInfo
-    ) {
+        // Perform window activation actions
         let raiseResult = AXUIElementPerformAction(axWindow, kAXRaiseAction as CFString)
         let frontmostAttr = kAXFrontmostAttribute as CFString
-        let frontmostResult = AXUIElementSetAttributeValue(
-            appElement,
-            frontmostAttr,
-            kCFBooleanTrue
-        )
+        let frontmostResult = AXUIElementSetAttributeValue(appElement, frontmostAttr, kCFBooleanTrue)
         let focusAttr = kAXFocusedWindowAttribute as CFString
-        let focusResult = AXUIElementSetAttributeValue(
-            appElement,
-            focusAttr,
-            axWindow as CFTypeRef
-        )
+        let focusResult = AXUIElementSetAttributeValue(appElement, focusAttr, axWindow as CFTypeRef)
 
+        // Log results
         if raiseResult == .success && frontmostResult == .success && focusResult == .success {
-            logger.debug("Successfully activated window")
+            logger.info("Successfully activated window: \(window.title)")
         } else {
             logger.warning(
                 """
@@ -511,10 +416,10 @@ class WindowManager: ObservableObject {
 
     func captureWindowThumbnail(_ window: WindowInfo) -> NSImage? {
         // Check user preference for using app icons
-        let useAppIcons = UserDefaults.standard.bool(forKey: "useAppIcons")
+        let useAppIcons = userDefaults.bool(forKey: "useAppIcons")
 
         if useAppIcons {
-            return getAppIconForWindow(window)
+            return getAppIcon(for: window)
         }
 
         // Try to capture window thumbnail
@@ -526,7 +431,7 @@ class WindowManager: ObservableObject {
         ) else {
             logger.warning("Failed to capture thumbnail for window: \(window.title) (ID: \(window.id))")
             // Fall back to app icon if thumbnail capture fails (likely no Screen Recording permission)
-            return getAppIconForWindow(window)
+            return getAppIcon(for: window)
         }
 
         let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
@@ -547,5 +452,104 @@ class WindowManager: ObservableObject {
 
         logger.warning("No icon available for: \(window.appName)")
         return NSImage(systemSymbolName: "app.dashed", accessibilityDescription: "App")
+    }
+
+    private func getAppIcon(for window: WindowInfo) -> NSImage? {
+        return getAppIconForWindow(window)
+    }
+
+    // MARK: - Window Actions
+
+    /// Closes the specified window
+    func closeWindow(_ window: WindowInfo) {
+        logger.info("Closing window: \(window.title) (ID: \(window.id))")
+
+        guard let app = NSRunningApplication(processIdentifier: window.ownerPID) else {
+            logger.error("Failed to get NSRunningApplication for PID: \(window.ownerPID)")
+            return
+        }
+
+        // Find the window using Accessibility API
+        if let axWindow = findAccessibilityWindow(for: window, in: app) {
+            // Get the close button
+            var closeButtonValue: AnyObject?
+            let closeButtonAttr = kAXCloseButtonAttribute as CFString
+
+            if AXUIElementCopyAttributeValue(axWindow, closeButtonAttr, &closeButtonValue) == .success {
+                // Cast to AXUIElement (safe because copy succeeded)
+                // swiftlint:disable:next force_cast
+                let closeButton = closeButtonValue as! AXUIElement
+                // Press the close button
+                let result = AXUIElementPerformAction(closeButton, kAXPressAction as CFString)
+
+                if result == .success {
+                    logger.info("Successfully closed window: \(window.title)")
+                } else {
+                    logger.warning("Failed to close window: \(window.title), error code: \(result.rawValue)")
+                }
+            } else {
+                logger.warning("Could not find close button for window: \(window.title)")
+            }
+        } else {
+            logger.warning("Could not find accessibility window for: \(window.title)")
+        }
+    }
+
+    /// Minimizes the specified window
+    func minimizeWindow(_ window: WindowInfo) {
+        logger.info("Minimizing window: \(window.title) (ID: \(window.id))")
+
+        guard let app = NSRunningApplication(processIdentifier: window.ownerPID) else {
+            logger.error("Failed to get NSRunningApplication for PID: \(window.ownerPID)")
+            return
+        }
+
+        // Find the window using Accessibility API
+        if let axWindow = findAccessibilityWindow(for: window, in: app) {
+            // Set the minimized attribute
+            var minimizedValue: AnyObject?
+            let minimizedAttr = kAXMinimizedAttribute as CFString
+
+            // First check if window can be minimized
+            if AXUIElementCopyAttributeValue(axWindow, minimizedAttr, &minimizedValue) == .success {
+                // Set minimized to true
+                let result = AXUIElementSetAttributeValue(axWindow, minimizedAttr, kCFBooleanTrue)
+
+                if result == .success {
+                    logger.info("Successfully minimized window: \(window.title)")
+                } else {
+                    logger.warning("Failed to minimize window: \(window.title), error code: \(result.rawValue)")
+
+                    // Try alternative method using minimize button
+                    minimizeWindowViaButton(axWindow, window: window)
+                }
+            } else {
+                // Try minimize button as fallback
+                minimizeWindowViaButton(axWindow, window: window)
+            }
+        } else {
+            logger.warning("Could not find accessibility window for: \(window.title)")
+        }
+    }
+
+    /// Alternative method to minimize window using the minimize button
+    private func minimizeWindowViaButton(_ axWindow: AXUIElement, window: WindowInfo) {
+        var minimizeButtonValue: AnyObject?
+        let minimizeButtonAttr = kAXMinimizeButtonAttribute as CFString
+
+        if AXUIElementCopyAttributeValue(axWindow, minimizeButtonAttr, &minimizeButtonValue) == .success {
+            // Cast to AXUIElement (safe because copy succeeded)
+            // swiftlint:disable:next force_cast
+            let minimizeButton = minimizeButtonValue as! AXUIElement
+            let result = AXUIElementPerformAction(minimizeButton, kAXPressAction as CFString)
+
+            if result == .success {
+                logger.info("Successfully minimized window via button: \(window.title)")
+            } else {
+                logger.warning("Failed to minimize window via button: \(window.title)")
+            }
+        } else {
+            logger.warning("Could not find minimize button for window: \(window.title)")
+        }
     }
 }

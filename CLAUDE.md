@@ -57,25 +57,36 @@ Sources/WindowSwitcher/
 - **Screen Recording**: Optional for window previews (falls back to app icons)
 - Uses native macOS permission prompts only (no custom alerts)
 
-## Recent Improvements (2025-10-16)
+## Recent Improvements (2025-11-08)
 
-### Bug Fixes
+### Major Features Added
+1. ✅ **Search & Filter** - Type to search windows by title or app name in real-time
+2. ✅ **Direct Window Access** - Cmd+1-9 to jump directly to windows 1-9 with visual badges
+3. ✅ **Window Actions** - Close or minimize windows directly from switcher (hover actions)
+4. ✅ **Off-Screen Fix** - Added scroll indicators and window count display for many windows
+
+### Bug Fixes (2025-11-08)
+1. ✅ **Thread Safety** - Added NSLock protection for windowActivationOrder array
+2. ✅ **Force Unwrapping** - Replaced unsafe force unwraps with safe optional binding in AppState
+3. ✅ **Method Refactoring** - Split 95-line activateWindow into 8 focused methods
+4. ✅ **Reset to Defaults** - Now properly clears UserDefaults before resetting values
+5. ✅ **Preferences Documentation** - Updated keyboard shortcuts section with all new features
+
+### Previous Improvements (2025-10-16)
 1. ✅ **Launch at Login** - Implemented using `SMAppService` (macOS 13+)
 2. ✅ **Window Activation** - Added title matching fallback for better reliability
 3. ✅ **Permission Handling** - Removed confusing custom alerts, use native macOS prompts
-4. ✅ **Code Cleanup** - Removed unused animation speed preference, extracted duplicate components
+4. ✅ **Auto-Scroll Navigation** - ScrollViewReader keeps selected window centered
+5. ✅ **Window Filtering** - Removes tiny/irrelevant windows, smart sorting
+6. ✅ **Compact Layout** - Reduced spacing for better multi-window experience
 
-### UX Improvements
-1. ✅ **Auto-Scroll Navigation** - ScrollViewReader keeps selected window centered
-2. ✅ **Window Filtering** - Removes tiny/irrelevant windows, smart sorting
-3. ✅ **Compact Layout** - Reduced spacing for better multi-window experience
-4. ✅ **Graceful Fallbacks** - App icons when Screen Recording permission denied
-
-### Code Quality
-- Git repository initialized
-- SwiftLint integration with passing checks
-- Removed duplicate code (ShortcutRow component)
-- Clean commit history with descriptive messages
+### Code Quality & Testing
+- ✅ **Test Coverage**: Increased from 0% to ~65% with comprehensive test suite
+- ✅ **Tests Added**: 120+ tests covering WindowInfo, AppState, WindowManager, KeyboardMonitor, SwitcherCoordinator, Preferences, and all new features
+- ✅ **Code Review**: Comprehensive review with CODE_REVIEW.md documenting all issues
+- ✅ **SwiftLint**: Integration with passing checks
+- ✅ **Documentation**: Added TEST_PLAN.md, PREFERENCES_REVIEW.md, Tests/README.md
+- ✅ **Git**: Clean commit history with descriptive messages
 
 ## Building the App
 
@@ -197,19 +208,24 @@ Users must run: `xattr -cr /Applications/WindowSwitcher.app` on first install.
 ## Future Enhancements
 
 ### Potential Features
-- [ ] Customizable keyboard shortcuts
+- [ ] Customizable keyboard shortcuts (primary shortcuts)
 - [ ] Window preview zoom on hover
-- [ ] Recently used window ordering
-- [ ] Search/filter windows by name
+- [ ] Recently used window ordering (MRU mode)
 - [ ] Dark mode auto-detection
 - [ ] Per-app window filtering rules
-- [ ] Keyboard shortcuts for direct window access (Cmd+1, Cmd+2, etc.)
+- [ ] Export/import preference settings
+- [ ] Window statistics (show filtered count)
+- [ ] Cmd+0 to access window 10+ (if more than 9 windows)
+- [ ] Fuzzy search algorithm (beyond simple substring matching)
+- [ ] Window grouping by workspace/display
 
 ### Technical Debt
-- Add unit tests for WindowManager and KeyboardMonitor
-- Consider refactoring activateWindow (75 lines, SwiftLint warning)
-- Add integration tests for keyboard event handling
-- Document public APIs with doc comments
+- ✅ ~~Add unit tests for WindowManager and KeyboardMonitor~~ (COMPLETED)
+- ✅ ~~Consider refactoring activateWindow~~ (COMPLETED - split into 8 methods)
+- [ ] Add integration tests for permission handling
+- [ ] Document public APIs with doc comments
+- [ ] Add performance benchmarks for thumbnail capture
+- [ ] Consider caching strategies for very large window counts (50+)
 
 ## Resources
 
@@ -233,5 +249,5 @@ Users must run: `xattr -cr /Applications/WindowSwitcher.app` on first install.
 
 ---
 
-*Last Updated: 2025-10-16*
-*Project Version: 1.0*
+*Last Updated: 2025-11-08*
+*Project Version: 1.1*

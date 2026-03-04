@@ -23,6 +23,12 @@ let package = Package(
             resources: [
                 .copy("AppIcon.icns")
             ]
+        ),
+        .testTarget(
+            name: "WindowSwitcherTests",
+            dependencies: ["WindowSwitcher"],
+            path: "Tests/WindowSwitcherTests",
+            exclude: ["README.md"]
         )
     ]
 )

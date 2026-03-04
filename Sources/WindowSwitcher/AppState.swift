@@ -15,8 +15,10 @@ class AppState: ObservableObject {
     private var preferencesWindowObserver: NSObjectProtocol?
 
     func openAboutWindow() {
-        if aboutWindow == nil || aboutWindow?.isVisible == false {
-            // Remove previous observer before creating a new window
+        if let window = aboutWindow, window.isVisible {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        } else {
             if let observer = aboutWindowObserver {
                 NotificationCenter.default.removeObserver(observer)
             }
@@ -29,15 +31,14 @@ class AppState: ObservableObject {
             aboutWindow = window
             aboutWindowObserver = observer
             isAboutWindowOpen = true
-        } else {
-            aboutWindow?.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
         }
     }
 
     func openPreferencesWindow() {
-        if preferencesWindow == nil || preferencesWindow?.isVisible == false {
-            // Remove previous observer before creating a new window
+        if let window = preferencesWindow, window.isVisible {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        } else {
             if let observer = preferencesWindowObserver {
                 NotificationCenter.default.removeObserver(observer)
             }
@@ -50,9 +51,6 @@ class AppState: ObservableObject {
             preferencesWindow = window
             preferencesWindowObserver = observer
             isPreferencesWindowOpen = true
-        } else {
-            preferencesWindow?.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
         }
     }
 
