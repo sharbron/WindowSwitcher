@@ -100,7 +100,7 @@ class WindowManager: ObservableObject {
 
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
-            self.cacheRefreshTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            self.cacheRefreshTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
                 self?.refreshThumbnailCache()
             }
         }
@@ -476,10 +476,9 @@ class WindowManager: ObservableObject {
             let closeButtonAttr = kAXCloseButtonAttribute as CFString
 
             if AXUIElementCopyAttributeValue(axWindow, closeButtonAttr, &closeButtonValue) == .success {
-                // Cast to AXUIElement (safe because copy succeeded)
+                // Cast is safe: AXUIElementCopyAttributeValue guarantees AXUIElement on success
                 // swiftlint:disable:next force_cast
                 let closeButton = closeButtonValue as! AXUIElement
-                // Press the close button
                 let result = AXUIElementPerformAction(closeButton, kAXPressAction as CFString)
 
                 if result == .success {
@@ -538,7 +537,7 @@ class WindowManager: ObservableObject {
         let minimizeButtonAttr = kAXMinimizeButtonAttribute as CFString
 
         if AXUIElementCopyAttributeValue(axWindow, minimizeButtonAttr, &minimizeButtonValue) == .success {
-            // Cast to AXUIElement (safe because copy succeeded)
+            // Cast is safe: AXUIElementCopyAttributeValue guarantees AXUIElement on success
             // swiftlint:disable:next force_cast
             let minimizeButton = minimizeButtonValue as! AXUIElement
             let result = AXUIElementPerformAction(minimizeButton, kAXPressAction as CFString)

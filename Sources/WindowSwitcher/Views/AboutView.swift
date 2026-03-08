@@ -5,10 +5,17 @@ struct AboutView: View {
         VStack(spacing: 16) {
             // App Icon and Title
             HStack(spacing: 16) {
-                Image(systemName: "square.3.layers.3d")
-                    .resizable()
-                    .frame(width: 60, height: 60)
-                    .foregroundColor(.accentColor)
+                if let appIcon = NSImage(named: "AppIcon") {
+                    Image(nsImage: appIcon)
+                        .resizable()
+                        .frame(width: 80, height: 80)
+                        .cornerRadius(12)
+                } else {
+                    Image(systemName: "square.3.layers.3d")
+                        .resizable()
+                        .frame(width: 60, height: 60)
+                        .foregroundColor(.accentColor)
+                }
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Window Switcher")
@@ -57,6 +64,8 @@ struct AboutView: View {
                 VStack(spacing: 4) {
                     ShortcutRow(keys: "⌘ Tab", description: "Show switcher / Next window")
                     ShortcutRow(keys: "⌘⇧ Tab", description: "Previous window")
+                    ShortcutRow(keys: "Type (a-z, 0-9)", description: "Search by title or app name")
+                    ShortcutRow(keys: "⌘ 1-9", description: "Jump directly to window 1-9")
                     ShortcutRow(keys: "Esc", description: "Cancel")
                 }
                 .padding(.horizontal)
