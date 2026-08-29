@@ -62,6 +62,14 @@ Sources/WindowSwitcher/
 
 ## Recent Improvements (2026-08-29)
 
+### Native macOS Settings
+0. ✅ **Tabbed Settings window** — Preferences was one 1414pt scroll behind a large decorative
+   header. It is now a `TabView` (General / Appearance / Shortcuts / Permissions) of
+   `.formStyle(.grouped)` forms, which is the System Settings idiom: grouped rounded sections,
+   toggles rendered as switches, sliders with an inline value, and shortcut rows with the
+   action leading and the keycap trailing. The window resizes per tab (362–652pt) because it is
+   driven by an `NSHostingController` rather than a fixed `contentRect`.
+
 ### Correctness Fixes
 1. ✅ **Window matching by bounds** — `kAXPositionAttribute` returns an opaque `AXValue`, so the
    old `as? CGPoint` cast always failed and bounds matching never once succeeded. Every
@@ -277,9 +285,12 @@ Users must run: `xattr -cr /Applications/WindowSwitcher.app` on first install.
 ### Technical Debt
 - ✅ ~~Add unit tests for WindowManager and KeyboardMonitor~~ (COMPLETED)
 - ✅ ~~Consider refactoring activateWindow~~ (COMPLETED - split into 8 methods)
-- [ ] **Migrate off `CGWindowListCreateImage`** — deprecated as of macOS 14 in favour of
-      ScreenCaptureKit. Still functional, but it is an async API with a different permission
-      model, so this is a project rather than a patch.
+- [ ] **Migrate off `CGWindowListCreateImage`** — this is now urgent rather than tidy-up.
+      On the current SDK the symbol is marked *unavailable*, not merely deprecated: it compiles
+      only because `Package.swift` pins the deployment target to macOS 13. Raising that target
+      breaks the build outright. ScreenCaptureKit is an async API with a different permission
+      model, so it is a project rather than a patch — but it now blocks any deployment-target
+      bump.
 - [ ] Consider annotating `SwitcherCoordinator` as `@MainActor` to make its main-thread
       confinement compiler-enforced rather than conventional.
 - [ ] Add integration tests for permission handling

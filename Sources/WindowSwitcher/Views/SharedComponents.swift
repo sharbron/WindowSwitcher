@@ -20,6 +20,7 @@ enum SwitcherShortcuts {
     static let navigation = [
         KeyboardShortcutItem("⌘ Tab", "Show switcher and select next window"),
         KeyboardShortcutItem("⌘⇧ Tab", "Select previous window"),
+        KeyboardShortcutItem("⌘ 1-9", "Jump directly to window 1-9"),
         KeyboardShortcutItem("Release ⌘", "Activate selected window"),
         KeyboardShortcutItem("Esc", "Cancel and close switcher")
     ]
@@ -27,10 +28,6 @@ enum SwitcherShortcuts {
     static let search = [
         KeyboardShortcutItem("Type", "Search windows by title or app name"),
         KeyboardShortcutItem("Delete", "Delete a search character")
-    ]
-
-    static let directAccess = [
-        KeyboardShortcutItem("⌘ 1-9", "Jump directly to window 1-9")
     ]
 
     static let windowActions = [
@@ -93,20 +90,18 @@ struct ShortcutList: View {
     }
 }
 
-/// Displays a keyboard shortcut with its description.
-struct ShortcutRow: View {
-    let keys: String
-    let description: String
+/// Shortcut rows styled for a settings `Form`: the action on the left, the keycap trailing —
+/// the layout macOS itself uses for shortcut lists.
+struct ShortcutFormRows: View {
+    let shortcuts: [KeyboardShortcutItem]
 
     var body: some View {
-        HStack(spacing: 12) {
-            KeyCap(keys: keys)
-
-            Text(description)
-                .font(.caption)
-                .foregroundColor(.secondary)
-
-            Spacer()
+        ForEach(shortcuts) { shortcut in
+            LabeledContent {
+                KeyCap(keys: shortcut.keys)
+            } label: {
+                Text(shortcut.description)
+            }
         }
     }
 }

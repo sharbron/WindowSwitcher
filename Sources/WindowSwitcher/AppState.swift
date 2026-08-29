@@ -25,7 +25,6 @@ class AppState: ObservableObject {
             let (window, observer) = createWindow(
                 title: "About Window Switcher",
                 view: AboutView(),
-                maxSize: NSSize(width: 420, height: 900),
                 onClose: { [weak self] in self?.isAboutWindowOpen = false }
             )
             aboutWindow = window
@@ -45,7 +44,6 @@ class AppState: ObservableObject {
             let (window, observer) = createWindow(
                 title: "Window Switcher Preferences",
                 view: PreferencesView(),
-                maxSize: NSSize(width: 600, height: 700),
                 onClose: { [weak self] in self?.isPreferencesWindowOpen = false }
             )
             preferencesWindow = window
@@ -54,34 +52,34 @@ class AppState: ObservableObject {
         }
     }
 
-    /// Creates a window sized to fit its content.
+    /// Creates a window that sizes itself to its SwiftUI content, and keeps doing so.
     ///
-    /// `maxSize` is a ceiling, not a target: the window takes the smaller of what the view
-    /// actually needs and what will fit on screen. Hardcoding a size instead meant a view that
-    /// outgrew its number got silently centre-clipped at both ends — which is what happened to
-    /// the About window's title and email link.
+    /// Hosting the view in an `NSHostingController` set as the window's `contentViewController`
+    /// (rather than assigning `contentView` directly) makes AppKit track the content's ideal
+    /// size — so the Settings window grows and shrinks as you move between tabs, the way macOS
+    /// settings windows do, and no view can be clipped by a hardcoded number the way the About
+    /// window's was.
     private func createWindow<Content: View>(
         title: String,
         view: Content,
-        maxSize: NSSize,
         onClose: @escaping () -> Void
     ) -> (NSWindow, NSObjectProtocol) {
-        let hostingView = NSHostingView(rootView: view)
-        let contentSize = fittedSize(for: hostingView, maxSize: maxSize)
+        let controller = NSHostingController(rootView: view)
+        let window = NSWindow(contentViewController: controller)
 
-        let window = NSWindow(
-            contentRect: NSRect(origin: .zero, size: contentSize),
-            styleMask: [.titled, .closable, .miniaturizable],
-            backing: .buffered,
-            defer: false
-        )
-
+        window.styleMask = [.titled, .closable, .miniaturizable]
         window.title = title
+        window.isReleasedWhenClosed = false
+
+        // A backstop only: content should never want more than the screen, but if it ever does,
+        // clamp rather than opening a window taller than the display.
+        if let visible = NSScreen.main?.visibleFrame.size {
+            window.contentMaxSize = NSSize(width: visible.width * 0.9, height: visible.height * 0.9)
+        }
+
         window.center()
-        window.contentView = hostingView
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        window.isReleasedWhenClosed = false
 
         // Store the returned token so the observer can be properly removed later
         let observer = NotificationCenter.default.addObserver(
@@ -93,16 +91,5 @@ class AppState: ObservableObject {
         }
 
         return (window, observer)
-    }
-
-    /// The content's natural size, capped by `maxSize` and by the visible screen.
-    private func fittedSize(for hostingView: NSView, maxSize: NSSize) -> NSSize {
-        let fitting = hostingView.fittingSize
-        let screen = NSScreen.main?.visibleFrame.size ?? NSSize(width: 1440, height: 900)
-
-        return NSSize(
-            width: min(fitting.width, min(maxSize.width, screen.width * 0.9)),
-            height: min(fitting.height, min(maxSize.height, screen.height * 0.9))
-        )
     }
 }

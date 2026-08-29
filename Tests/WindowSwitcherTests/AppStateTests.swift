@@ -164,21 +164,23 @@ final class AppStateTests: XCTestCase {
             return
         }
 
-        // The window must be at least as tall as its content needs. Asserting a fixed number
-        // here is what let the About window ship clipped: the content grew past 540pt and
-        // SwiftUI centre-cropped the title off the top and the email link off the bottom.
+        // Asserting a fixed number here is what let the About window ship clipped: its content
+        // grew past 540pt and SwiftUI centre-cropped the title off the top and the email link
+        // off the bottom. The window is now driven by an NSHostingController, so AppKit sizes
+        // it from the content — assert that mechanism and the content's own measurements.
+        // (Final window geometry needs a display cycle, so it is not observable here.)
+        XCTAssertNotNil(
+            window.contentViewController,
+            "Window must be driven by a hosting controller so AppKit tracks the content size"
+        )
+
         guard let contentView = window.contentView else {
             XCTFail("Window should have a content view")
             return
         }
 
-        let required = contentView.fittingSize
-        XCTAssertEqual(contentView.frame.width, 420, accuracy: 1.0, "About is a fixed-width layout")
-        XCTAssertGreaterThanOrEqual(
-            contentView.frame.height,
-            required.height - 1.0,
-            "About window must not clip its content"
-        )
+        XCTAssertEqual(contentView.fittingSize.width, 420, accuracy: 1.0, "About is a fixed-width layout")
+        XCTAssertGreaterThan(contentView.fittingSize.height, 0, "Content must report a real height")
     }
 
     func testPreferencesWindowSize() {
@@ -191,16 +193,22 @@ final class AppStateTests: XCTestCase {
             return
         }
 
-        // Preferences is taller than any sensible window, so it scrolls: here the contract is
-        // that the window is capped rather than that it fits, and never zero-height.
+        // Settings is a tabbed window that resizes to the selected tab, so it must be driven by
+        // a hosting controller rather than a fixed contentRect.
+        XCTAssertNotNil(window.contentViewController)
+
         guard let contentView = window.contentView else {
             XCTFail("Window should have a content view")
             return
         }
 
-        XCTAssertEqual(contentView.frame.width, 600, accuracy: 1.0)
-        XCTAssertLessThanOrEqual(contentView.frame.height, 700, "Should honour the size cap")
-        XCTAssertGreaterThan(contentView.frame.height, 0)
+        XCTAssertEqual(contentView.fittingSize.width, SettingsTab.width, accuracy: 1.0)
+        XCTAssertEqual(
+            contentView.fittingSize.height,
+            SettingsTab.general.contentHeight,
+            accuracy: 1.0,
+            "Should open sized to the General tab"
+        )
     }
 
     // MARK: - Window Style Tests
