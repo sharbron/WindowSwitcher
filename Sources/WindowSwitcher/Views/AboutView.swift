@@ -1,6 +1,11 @@
 import SwiftUI
 
 struct AboutView: View {
+    /// Read from the bundle so this cannot drift from the shipped version.
+    private var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
+    }
+
     var body: some View {
         VStack(spacing: 16) {
             // App Icon and Title
@@ -22,7 +27,7 @@ struct AboutView: View {
                         .font(.title2)
                         .fontWeight(.semibold)
 
-                    Text("Version 1.0")
+                    Text("Version \(appVersion)")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
 
@@ -61,14 +66,8 @@ struct AboutView: View {
                 Text("Keyboard Shortcuts")
                     .font(.headline)
 
-                VStack(spacing: 4) {
-                    ShortcutRow(keys: "⌘ Tab", description: "Show switcher / Next window")
-                    ShortcutRow(keys: "⌘⇧ Tab", description: "Previous window")
-                    ShortcutRow(keys: "Type (a-z, 0-9)", description: "Search by title or app name")
-                    ShortcutRow(keys: "⌘ 1-9", description: "Jump directly to window 1-9")
-                    ShortcutRow(keys: "Esc", description: "Cancel")
-                }
-                .padding(.horizontal)
+                ShortcutList(shortcuts: SwitcherShortcuts.essentials)
+                    .padding(.horizontal)
             }
 
             Divider()
@@ -87,11 +86,11 @@ struct AboutView: View {
                 .buttonStyle(.link)
                 .font(.caption)
             }
-
-            Spacer()
         }
         .padding()
-        .frame(width: 420, height: 540)
+        // Width only. Pinning the height clipped the content — the window now sizes itself to
+        // whatever this needs (see AppState.createWindow).
+        .frame(width: 420)
     }
 }
 

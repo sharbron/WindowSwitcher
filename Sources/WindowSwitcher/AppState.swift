@@ -25,7 +25,7 @@ class AppState: ObservableObject {
             let (window, observer) = createWindow(
                 title: "About Window Switcher",
                 view: AboutView(),
-                size: NSSize(width: 420, height: 540),
+                maxSize: NSSize(width: 420, height: 900),
                 onClose: { [weak self] in self?.isAboutWindowOpen = false }
             )
             aboutWindow = window
@@ -45,7 +45,7 @@ class AppState: ObservableObject {
             let (window, observer) = createWindow(
                 title: "Window Switcher Preferences",
                 view: PreferencesView(),
-                size: NSSize(width: 600, height: 650),
+                maxSize: NSSize(width: 600, height: 700),
                 onClose: { [weak self] in self?.isPreferencesWindowOpen = false }
             )
             preferencesWindow = window
@@ -54,14 +54,23 @@ class AppState: ObservableObject {
         }
     }
 
+    /// Creates a window sized to fit its content.
+    ///
+    /// `maxSize` is a ceiling, not a target: the window takes the smaller of what the view
+    /// actually needs and what will fit on screen. Hardcoding a size instead meant a view that
+    /// outgrew its number got silently centre-clipped at both ends — which is what happened to
+    /// the About window's title and email link.
     private func createWindow<Content: View>(
         title: String,
         view: Content,
-        size: NSSize,
+        maxSize: NSSize,
         onClose: @escaping () -> Void
     ) -> (NSWindow, NSObjectProtocol) {
+        let hostingView = NSHostingView(rootView: view)
+        let contentSize = fittedSize(for: hostingView, maxSize: maxSize)
+
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: size.width, height: size.height),
+            contentRect: NSRect(origin: .zero, size: contentSize),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -69,7 +78,7 @@ class AppState: ObservableObject {
 
         window.title = title
         window.center()
-        window.contentView = NSHostingView(rootView: view)
+        window.contentView = hostingView
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         window.isReleasedWhenClosed = false
@@ -84,5 +93,16 @@ class AppState: ObservableObject {
         }
 
         return (window, observer)
+    }
+
+    /// The content's natural size, capped by `maxSize` and by the visible screen.
+    private func fittedSize(for hostingView: NSView, maxSize: NSSize) -> NSSize {
+        let fitting = hostingView.fittingSize
+        let screen = NSScreen.main?.visibleFrame.size ?? NSSize(width: 1440, height: 900)
+
+        return NSSize(
+            width: min(fitting.width, min(maxSize.width, screen.width * 0.9)),
+            height: min(fitting.height, min(maxSize.height, screen.height * 0.9))
+        )
     }
 }

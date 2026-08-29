@@ -164,11 +164,21 @@ final class AppStateTests: XCTestCase {
             return
         }
 
-        // Check content size (excludes title bar)
-        let expectedContentSize = NSSize(width: 420, height: 540)
-        let contentFrame = window.contentView?.frame ?? .zero
-        XCTAssertEqual(contentFrame.size.width, expectedContentSize.width, accuracy: 1.0)
-        XCTAssertEqual(contentFrame.size.height, expectedContentSize.height, accuracy: 1.0)
+        // The window must be at least as tall as its content needs. Asserting a fixed number
+        // here is what let the About window ship clipped: the content grew past 540pt and
+        // SwiftUI centre-cropped the title off the top and the email link off the bottom.
+        guard let contentView = window.contentView else {
+            XCTFail("Window should have a content view")
+            return
+        }
+
+        let required = contentView.fittingSize
+        XCTAssertEqual(contentView.frame.width, 420, accuracy: 1.0, "About is a fixed-width layout")
+        XCTAssertGreaterThanOrEqual(
+            contentView.frame.height,
+            required.height - 1.0,
+            "About window must not clip its content"
+        )
     }
 
     func testPreferencesWindowSize() {
@@ -181,11 +191,16 @@ final class AppStateTests: XCTestCase {
             return
         }
 
-        // Check content size (excludes title bar)
-        let expectedContentSize = NSSize(width: 600, height: 650)
-        let contentFrame = window.contentView?.frame ?? .zero
-        XCTAssertEqual(contentFrame.size.width, expectedContentSize.width, accuracy: 1.0)
-        XCTAssertEqual(contentFrame.size.height, expectedContentSize.height, accuracy: 1.0)
+        // Preferences is taller than any sensible window, so it scrolls: here the contract is
+        // that the window is capped rather than that it fits, and never zero-height.
+        guard let contentView = window.contentView else {
+            XCTFail("Window should have a content view")
+            return
+        }
+
+        XCTAssertEqual(contentView.frame.width, 600, accuracy: 1.0)
+        XCTAssertLessThanOrEqual(contentView.frame.height, 700, "Should honour the size cap")
+        XCTAssertGreaterThan(contentView.frame.height, 0)
     }
 
     // MARK: - Window Style Tests

@@ -1,5 +1,7 @@
 import SwiftUI
 import ServiceManagement
+import ApplicationServices
+import Combine
 import os.log
 
 struct PreferencesView: View {
@@ -8,6 +10,11 @@ struct PreferencesView: View {
     @AppStorage("thumbnailSize") private var thumbnailSize: Double = 200
     @AppStorage("maxWindowsToShow") private var maxWindowsToShow: Double = 20
     @AppStorage("useAppIcons") private var useAppIcons: Bool = false
+
+    // Live permission state, refreshed whenever the app regains focus — the user grants these
+    // in System Settings and comes back, so a value read once at init goes stale immediately.
+    @State private var isAccessibilityTrusted = AXIsProcessTrusted()
+    @State private var isScreenRecordingGranted = CGPreflightScreenCaptureAccess()
 
     private let logger = Logger(subsystem: "com.windowswitcher", category: "Preferences")
 
@@ -80,7 +87,7 @@ struct PreferencesView: View {
                             }
 
                             Slider(value: $thumbnailSize, in: 150...300, step: 25) {
-                                Text("Thumbnail Size")
+                                EmptyView()
                             } minimumValueLabel: {
                                 Text("150")
                                     .font(.caption)
@@ -111,7 +118,7 @@ struct PreferencesView: View {
                             }
 
                             Slider(value: $maxWindowsToShow, in: 5...50, step: 5) {
-                                Text("Max Windows")
+                                EmptyView()
                             } minimumValueLabel: {
                                 Text("5")
                                     .font(.caption)
@@ -134,58 +141,32 @@ struct PreferencesView: View {
                     PreferenceSection(title: "Permissions", icon: "lock.shield") {
                         VStack(alignment: .leading, spacing: 16) {
                             // Accessibility Permission
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack {
-                                    Image(systemName: "checkmark.shield.fill")
-                                        .foregroundColor(.green)
-                                    Text("Accessibility access required")
-                                        .font(.subheadline)
-                                        .fontWeight(.medium)
-                                }
-
-                                Text(
-                                    """
+                            PermissionStatusView(
+                                title: "Accessibility access",
+                                granted: isAccessibilityTrusted,
+                                isRequired: true,
+                                explanation: """
                                     Window Switcher needs Accessibility permissions to \
                                     monitor keyboard shortcuts and control windows.
-                                    """
-                                )
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-
-                                Button("Open Accessibility Settings") {
-                                    openAccessibilityPreferences()
-                                }
-                                .buttonStyle(.bordered)
-                                .padding(.top, 4)
-                            }
+                                    """,
+                                buttonTitle: "Open Accessibility Settings",
+                                action: openAccessibilityPreferences
+                            )
 
                             Divider()
 
                             // Screen Recording Permission
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack {
-                                    Image(systemName: "camera.fill")
-                                        .foregroundColor(.orange)
-                                    Text("Screen Recording access recommended")
-                                        .font(.subheadline)
-                                        .fontWeight(.medium)
-                                }
-
-                                Text(
-                                    """
+                            PermissionStatusView(
+                                title: "Screen Recording access",
+                                granted: isScreenRecordingGranted,
+                                isRequired: false,
+                                explanation: """
                                     Capture live window previews for better identification. \
                                     Falls back to app icons if denied.
-                                    """
-                                )
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-
-                                Button("Open Screen Recording Settings") {
-                                    openScreenRecordingPreferences()
-                                }
-                                .buttonStyle(.bordered)
-                                .padding(.top, 4)
-                            }
+                                    """,
+                                buttonTitle: "Open Screen Recording Settings",
+                                action: openScreenRecordingPreferences
+                            )
                         }
                     }
 
@@ -193,43 +174,11 @@ struct PreferencesView: View {
 
                     // Keyboard Shortcuts Section
                     PreferenceSection(title: "Keyboard Shortcuts", icon: "command") {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Navigation")
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                                .foregroundColor(.secondary)
-                                .padding(.top, 4)
-
-                            ShortcutRow(keys: "⌘ Tab", description: "Show switcher and select next window")
-                            ShortcutRow(keys: "⌘⇧ Tab", description: "Select previous window")
-                            ShortcutRow(keys: "Esc", description: "Cancel and close switcher")
-                            ShortcutRow(keys: "Release ⌘", description: "Activate selected window")
-
-                            Text("Search & Filter")
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                                .foregroundColor(.secondary)
-                                .padding(.top, 12)
-
-                            ShortcutRow(keys: "Type (a-z, 0-9)", description: "Search windows by title or app name")
-                            ShortcutRow(keys: "⌫ Backspace", description: "Clear search query")
-
-                            Text("Direct Access")
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                                .foregroundColor(.secondary)
-                                .padding(.top, 12)
-
-                            ShortcutRow(keys: "⌘ 1-9", description: "Jump directly to window 1-9")
-
-                            Text("Window Actions")
-                                .font(.caption)
-                                .fontWeight(.semibold)
-                                .foregroundColor(.secondary)
-                                .padding(.top, 12)
-
-                            ShortcutRow(keys: "Hover + Click ✕", description: "Close window")
-                            ShortcutRow(keys: "Hover + Click −", description: "Minimize window")
+                        VStack(alignment: .leading, spacing: 16) {
+                            ShortcutGroup(title: "Navigation", shortcuts: SwitcherShortcuts.navigation)
+                            ShortcutGroup(title: "Search & Filter", shortcuts: SwitcherShortcuts.search)
+                            ShortcutGroup(title: "Direct Access", shortcuts: SwitcherShortcuts.directAccess)
+                            ShortcutGroup(title: "Window Actions", shortcuts: SwitcherShortcuts.windowActions)
                         }
 
                         Text("Primary shortcuts (⌘Tab, ⌘⇧Tab, Esc) are fixed and cannot be customized.")
@@ -258,7 +207,26 @@ struct PreferencesView: View {
             }
             .padding()
         }
-        .frame(width: 600, height: 650)
+        .frame(width: 600)
+        // Keep the live permission readout honest when the user returns from System Settings.
+        .onAppear(perform: refreshPermissionStatus)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            refreshPermissionStatus()
+        }
+    }
+
+    private func refreshPermissionStatus() {
+        isAccessibilityTrusted = AXIsProcessTrusted()
+        isScreenRecordingGranted = CGPreflightScreenCaptureAccess()
+        syncLaunchAtLoginToggle()
+    }
+
+    /// The toggle is only a cached copy of a system setting the user can change elsewhere.
+    private func syncLaunchAtLoginToggle() {
+        let registered = SMAppService.mainApp.status == .enabled
+        if launchAtLogin != registered {
+            launchAtLogin = registered
+        }
     }
 
     /// Read from the bundle so the footer cannot drift from the shipped version.
@@ -353,6 +321,75 @@ struct PreferenceSection<Content: View>: View {
                 .foregroundColor(.primary)
 
             content
+        }
+    }
+}
+
+/// A titled group of shortcuts.
+struct ShortcutGroup: View {
+    let title: String
+    let shortcuts: [KeyboardShortcutItem]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundColor(.secondary)
+
+            ShortcutList(shortcuts: shortcuts)
+        }
+    }
+}
+
+/// Shows whether a system permission is actually granted, rather than asserting it is.
+struct PermissionStatusView: View {
+    let title: String
+    let granted: Bool
+    /// Required permissions read as an error when missing; optional ones only as a suggestion.
+    let isRequired: Bool
+    let explanation: String
+    let buttonTitle: String
+    let action: () -> Void
+
+    private var iconName: String {
+        if granted { return "checkmark.circle.fill" }
+        return isRequired ? "exclamationmark.triangle.fill" : "info.circle.fill"
+    }
+
+    private var iconColor: Color {
+        if granted { return .green }
+        return isRequired ? .red : .orange
+    }
+
+    private var statusText: String {
+        if granted { return "Granted" }
+        return isRequired ? "Required — not granted" : "Not granted"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: iconName)
+                    .foregroundColor(iconColor)
+                Text(title)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                Text(statusText)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Text(explanation)
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            // Nothing to do once it is granted.
+            if !granted {
+                Button(buttonTitle, action: action)
+                    .buttonStyle(.bordered)
+                    .padding(.top, 4)
+            }
         }
     }
 }
