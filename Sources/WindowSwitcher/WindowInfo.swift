@@ -11,6 +11,8 @@ struct WindowInfo: Identifiable, Equatable {
     let layer: Int
     let isOnScreen: Bool
     var thumbnail: NSImage?
+    /// Resolved once during enumeration so SwiftUI bodies never hit NSRunningApplication.
+    var appIcon: NSImage?
 
     static func == (lhs: WindowInfo, rhs: WindowInfo) -> Bool {
         lhs.id == rhs.id
@@ -21,164 +23,100 @@ class WindowManager: ObservableObject {
     @Published var windows: [WindowInfo] = []
     private let logger = Logger(subsystem: "com.windowswitcher", category: "WindowManager")
 
-    // Thumbnail cache for instant display
-    private var thumbnailCache: [CGWindowID: NSImage] = [:]
-    private var cacheRefreshTimer: Timer?
-    private var isCacheRefreshActive = false
-    private let cacheRefreshLock = NSLock()
+    /// Captures and caches window previews. See ThumbnailCache.swift.
+    private let thumbnails: ThumbnailCache
 
     // Track window activation order for recency sorting
     private var windowActivationOrder: [CGWindowID] = []
     private let activationLock = NSLock()
     private let maxActivationHistorySize = 50
 
+    private static let activationOrderKey = "windowActivationOrder"
+
     // UserDefaults instance for testing/dependency injection
     private let userDefaults: UserDefaults
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
+        self.thumbnails = ThumbnailCache(userDefaults: userDefaults)
         loadActivationHistory()
     }
 
+    // MARK: - Thumbnails
+
+    func startCacheRefresh() {
+        thumbnails.startPeriodicRefresh()
+    }
+
+    func stopCacheRefresh() {
+        thumbnails.stopPeriodicRefresh()
+    }
+
+    func captureWindowThumbnail(_ window: WindowInfo) -> NSImage? {
+        thumbnails.capture(window)
+    }
+
+    func getAppIconForWindow(_ window: WindowInfo) -> NSImage? {
+        ThumbnailCache.appIcon(for: window)
+    }
+
+    // MARK: - Activation History
+
     private func loadActivationHistory() {
-        // Load previously saved activation order
-        if let saved = userDefaults.array(forKey: "windowActivationOrder") as? [UInt32] {
+        if let saved = userDefaults.array(forKey: Self.activationOrderKey) as? [UInt32] {
             activationLock.lock()
             windowActivationOrder = saved.map { CGWindowID($0) }
             activationLock.unlock()
         }
     }
 
-    private func saveActivationHistory() {
-        // Save activation order for persistence across app restarts
+    private func currentActivationOrderForStorage() -> [UInt32] {
         activationLock.lock()
-        let orderToSave = windowActivationOrder.map { UInt32($0) }
-        activationLock.unlock()
-
-        userDefaults.set(orderToSave, forKey: "windowActivationOrder")
+        defer { activationLock.unlock() }
+        return windowActivationOrder.map { UInt32($0) }
     }
 
     /// Synchronously save activation history (for testing)
     func flushActivationHistory() {
-        saveActivationHistory()
+        userDefaults.set(currentActivationOrderForStorage(), forKey: Self.activationOrderKey)
     }
 
     func recordWindowActivation(_ windowID: CGWindowID) {
-        // Protect array access with lock
         activationLock.lock()
-
-        // Remove if already in list
         windowActivationOrder.removeAll { $0 == windowID }
-        // Add to front (most recent)
         windowActivationOrder.insert(windowID, at: 0)
-        // Keep list size manageable
         if windowActivationOrder.count > maxActivationHistorySize {
             windowActivationOrder = Array(windowActivationOrder.prefix(maxActivationHistorySize))
         }
-
-        // Create snapshot for saving (outside critical section)
         let orderToSave = windowActivationOrder.map { UInt32($0) }
         activationLock.unlock()
 
-        // Save asynchronously to avoid blocking
-        // Capture userDefaults directly to ensure save always happens
+        // Save off the hot path. Capture userDefaults directly so the write always lands.
         DispatchQueue.global(qos: .utility).async { [userDefaults = self.userDefaults] in
-            userDefaults.set(orderToSave, forKey: "windowActivationOrder")
+            userDefaults.set(orderToSave, forKey: Self.activationOrderKey)
         }
     }
 
-    deinit {
-        stopCacheRefresh()
-    }
-
-    func startCacheRefresh() {
-        cacheRefreshLock.lock()
-        defer { cacheRefreshLock.unlock() }
-
-        guard !isCacheRefreshActive else { return }
-        isCacheRefreshActive = true
-
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            self.cacheRefreshTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-                self?.refreshThumbnailCache()
-            }
-        }
-    }
-
-    func stopCacheRefresh() {
-        cacheRefreshLock.lock()
-        defer { cacheRefreshLock.unlock() }
-
-        guard isCacheRefreshActive else { return }
-        isCacheRefreshActive = false
-
-        DispatchQueue.main.async { [weak self] in
-            self?.cacheRefreshTimer?.invalidate()
-            self?.cacheRefreshTimer = nil
-        }
-    }
-
-    private func refreshThumbnailCache() {
-        // Use higher priority queue for faster, more responsive updates
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self = self else { return }
-
-            // Get current window list (only on-screen windows)
-            let options: CGWindowListOption = [.excludeDesktopElements, .optionOnScreenOnly]
-            guard let windowInfoList = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
-                return
-            }
-
-            var newCache: [CGWindowID: NSImage] = [:]
-
-            for windowInfo in windowInfoList {
-                guard let windowID = windowInfo[kCGWindowNumber as String] as? CGWindowID,
-                      let ownerPID = windowInfo[kCGWindowOwnerPID as String] as? pid_t,
-                      let layer = windowInfo[kCGWindowLayer as String] as? Int,
-                      layer == 0 else {
-                    continue
-                }
-
-                // Create a minimal WindowInfo for thumbnail capture
-                let tempWindow = WindowInfo(
-                    id: windowID,
-                    ownerPID: ownerPID,
-                    title: "",
-                    appName: "",
-                    bounds: .zero,
-                    layer: layer,
-                    isOnScreen: true,
-                    thumbnail: nil
-                )
-
-                // Always capture fresh thumbnail to keep cache up-to-date
-                if let thumbnail = self.captureWindowThumbnail(tempWindow) {
-                    newCache[windowID] = thumbnail
-                }
-            }
-
-            // Update cache on main thread
-            DispatchQueue.main.async {
-                self.thumbnailCache = newCache
-                self.logger.debug("Thumbnail cache updated with \(newCache.count) entries")
-            }
-        }
-    }
+    // MARK: - Window Enumeration
 
     func refreshWindows() {
-        // Get visible windows via CoreGraphics
         var windowList = getWindowsViaCoreGraphics()
 
-        // Create a thread-safe snapshot of activation order for sorting
         activationLock.lock()
         let activationOrderSnapshot = windowActivationOrder
         activationLock.unlock()
 
+        // Index the activation order once — firstIndex(of:) inside a sort comparator is O(n) per
+        // comparison, which makes the whole sort O(n^2 log n).
+        var recencyRank: [CGWindowID: Int] = [:]
+        for (rank, windowID) in activationOrderSnapshot.enumerated() {
+            recencyRank[windowID] = rank
+        }
+
         // Sort windows by recency (most recently activated first)
         windowList.sort { lhs, rhs in
-            let lhsIndex = activationOrderSnapshot.firstIndex(of: lhs.id) ?? Int.max
-            let rhsIndex = activationOrderSnapshot.firstIndex(of: rhs.id) ?? Int.max
+            let lhsIndex = recencyRank[lhs.id] ?? Int.max
+            let rhsIndex = recencyRank[rhs.id] ?? Int.max
 
             // Lower index = more recent (comes first)
             if lhsIndex != rhsIndex {
@@ -224,7 +162,7 @@ class WindowManager: ObservableObject {
             // Skip windows with layer != 0 (menu bars, dock, etc.)
             guard layer == 0 else { continue }
 
-            // Get app name
+            // Resolve the app once here — doing it in a SwiftUI body re-queries on every render.
             let runningApp = NSRunningApplication(processIdentifier: ownerPID)
             let appName = runningApp?.localizedName ?? "Unknown"
 
@@ -245,9 +183,6 @@ class WindowManager: ObservableObject {
                 continue
             }
 
-            // Use cached thumbnail if available, otherwise nil
-            let cachedThumbnail = thumbnailCache[windowID]
-
             let window = WindowInfo(
                 id: windowID,
                 ownerPID: ownerPID,
@@ -256,7 +191,8 @@ class WindowManager: ObservableObject {
                 bounds: rect,
                 layer: layer,
                 isOnScreen: isOnScreen,
-                thumbnail: cachedThumbnail
+                thumbnail: thumbnails.image(for: windowID),
+                appIcon: runningApp?.icon
             )
 
             windowList.append(window)
@@ -264,6 +200,8 @@ class WindowManager: ObservableObject {
 
         return windowList
     }
+
+    // MARK: - Window Activation
 
     func activateWindow(_ window: WindowInfo) {
         logger.info("Attempting to activate window: \(window.title) from app: \(window.appName)")
@@ -333,27 +271,62 @@ class WindowManager: ObservableObject {
         return nil
     }
 
+    /// Converts an accessibility attribute to an `AXValue`, or nil if it is some other type.
+    ///
+    /// The accessibility API returns position and size as an opaque `AXValue`, never as a
+    /// bridged `CGPoint`/`CGSize` — casting the `AnyObject` straight to `CGPoint` always
+    /// yields nil, which silently disables any matching built on it.
+    private func asAXValue(_ value: AnyObject?) -> AXValue? {
+        guard let value = value, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
+        // Cast is safe: the CFTypeID was verified to be AXValue immediately above.
+        // A conditional `as?` cast is rejected by the compiler for CoreFoundation types.
+        // swiftlint:disable:next force_cast
+        return (value as! AXValue)
+    }
+
+    private func cgPoint(from value: AnyObject?) -> CGPoint? {
+        guard let axValue = asAXValue(value) else { return nil }
+        var point = CGPoint.zero
+        guard AXValueGetValue(axValue, .cgPoint, &point) else { return nil }
+        return point
+    }
+
+    private func cgSize(from value: AnyObject?) -> CGSize? {
+        guard let axValue = asAXValue(value) else { return nil }
+        var size = CGSize.zero
+        guard AXValueGetValue(axValue, .cgSize, &size) else { return nil }
+        return size
+    }
+
+    /// Reads an accessibility window's frame in global (top-left origin) coordinates,
+    /// the same space `kCGWindowBounds` reports.
+    private func axWindowFrame(_ axWindow: AXUIElement) -> CGRect? {
+        var positionValue: AnyObject?
+        var sizeValue: AnyObject?
+
+        let posAttr = kAXPositionAttribute as CFString
+        let sizeAttr = kAXSizeAttribute as CFString
+
+        guard AXUIElementCopyAttributeValue(axWindow, posAttr, &positionValue) == .success,
+              AXUIElementCopyAttributeValue(axWindow, sizeAttr, &sizeValue) == .success else {
+            return nil
+        }
+
+        guard let position = cgPoint(from: positionValue),
+              let size = cgSize(from: sizeValue) else {
+            return nil
+        }
+
+        return CGRect(origin: position, size: size)
+    }
+
     /// Attempts to match a window by its bounds (position and size)
     private func matchWindowByBounds(_ window: WindowInfo, in axWindows: [AXUIElement]) -> AXUIElement? {
         let tolerance: CGFloat = 5.0
 
         for axWindow in axWindows {
-            var positionValue: AnyObject?
-            var sizeValue: AnyObject?
+            guard let axBounds = axWindowFrame(axWindow) else { continue }
 
-            let posAttr = kAXPositionAttribute as CFString
-            let sizeAttr = kAXSizeAttribute as CFString
-
-            guard AXUIElementCopyAttributeValue(axWindow, posAttr, &positionValue) == .success,
-                  AXUIElementCopyAttributeValue(axWindow, sizeAttr, &sizeValue) == .success,
-                  let position = positionValue as? CGPoint,
-                  let size = sizeValue as? CGSize else {
-                continue
-            }
-
-            let axBounds = CGRect(origin: position, size: size)
-
-            // Check if bounds match within tolerance
             if boundsMatch(axBounds, window.bounds, tolerance: tolerance) {
                 return axWindow
             }
@@ -412,50 +385,6 @@ class WindowManager: ObservableObject {
                 """
             )
         }
-    }
-
-    func captureWindowThumbnail(_ window: WindowInfo) -> NSImage? {
-        // Check user preference for using app icons
-        let useAppIcons = userDefaults.bool(forKey: "useAppIcons")
-
-        if useAppIcons {
-            return getAppIcon(for: window)
-        }
-
-        // Try to capture window thumbnail
-        guard let cgImage = CGWindowListCreateImage(
-            .null,
-            .optionIncludingWindow,
-            window.id,
-            [.bestResolution, .boundsIgnoreFraming]
-        ) else {
-            logger.warning("Failed to capture thumbnail for window: \(window.title) (ID: \(window.id))")
-            // Fall back to app icon if thumbnail capture fails (likely no Screen Recording permission)
-            return getAppIcon(for: window)
-        }
-
-        let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
-        logger.debug("Successfully captured thumbnail for window: \(window.title)")
-        return image
-    }
-
-    func getAppIconForWindow(_ window: WindowInfo) -> NSImage? {
-        guard let app = NSRunningApplication(processIdentifier: window.ownerPID) else {
-            logger.warning("Failed to get app for PID: \(window.ownerPID)")
-            return NSImage(systemSymbolName: "app.dashed", accessibilityDescription: "App")
-        }
-
-        if let icon = app.icon {
-            logger.debug("Using app icon for: \(window.appName)")
-            return icon
-        }
-
-        logger.warning("No icon available for: \(window.appName)")
-        return NSImage(systemSymbolName: "app.dashed", accessibilityDescription: "App")
-    }
-
-    private func getAppIcon(for window: WindowInfo) -> NSImage? {
-        return getAppIconForWindow(window)
     }
 
     // MARK: - Window Actions

@@ -2,15 +2,19 @@ import SwiftUI
 import AppKit
 
 struct WindowSwitcherView: View {
+    /// Already filtered and limited by the coordinator. The view renders this list verbatim so
+    /// that `selectedIndex` means the same thing here as it does where windows get activated.
     let windows: [WindowInfo]
     let selectedIndex: Int
+    /// How many windows match the search before the display limit — drives "showing X of Y".
+    let matchingWindowCount: Int
     let onSelect: (WindowInfo) -> Void
     let searchQuery: String
     let onCloseWindow: ((WindowInfo) -> Void)?
     let onMinimizeWindow: ((WindowInfo) -> Void)?
 
     @AppStorage("thumbnailSize") private var thumbnailSize: Double = 200
-    @AppStorage("maxWindowsToShow") private var maxWindowsToShow: Double = 20
+    @AppStorage("useAppIcons") private var useAppIcons: Bool = false
     @State private var hoveredWindowID: CGWindowID?
 
     private var thumbnailWidth: CGFloat {
@@ -21,27 +25,12 @@ struct WindowSwitcherView: View {
         CGFloat(thumbnailSize * 0.75) // Maintain 4:3 aspect ratio
     }
 
-    private var filteredWindows: [WindowInfo] {
-        if searchQuery.isEmpty {
-            return windows
-        }
-        return windows.filter { window in
-            window.title.localizedCaseInsensitiveContains(searchQuery) ||
-            window.appName.localizedCaseInsensitiveContains(searchQuery)
-        }
-    }
-
     private var displayWindows: [WindowInfo] {
-        let maxCount = Int(maxWindowsToShow)
-        return Array(filteredWindows.prefix(maxCount))
-    }
-
-    private var hasMoreWindows: Bool {
-        return filteredWindows.count > displayWindows.count
+        windows
     }
 
     private var totalWindowCount: Int {
-        return filteredWindows.count
+        matchingWindowCount
     }
 
     // Pre-compute window numbers to avoid O(n²) performance issue
@@ -99,6 +88,7 @@ struct WindowSwitcherView: View {
                                 thumbnailHeight: thumbnailHeight,
                                 windowNumber: windowNumbers[window.id],
                                 displayNumber: index < 9 ? index + 1 : nil, // Show 1-9 for Cmd+number
+                                showAppIconOverlay: !useAppIcons,
                                 onClose: onCloseWindow != nil ? { onCloseWindow?(window) } : nil,
                                 onMinimize: onMinimizeWindow != nil ? { onMinimizeWindow?(window) } : nil
                             )
@@ -185,7 +175,6 @@ struct WindowSwitcherView: View {
         guard let screen = NSScreen.main else { return 1200 }
         return screen.visibleFrame.width * 0.9
     }
-
 }
 
 // MARK: - Helper Views
@@ -213,6 +202,9 @@ struct WindowThumbnailView: View {
     let thumbnailHeight: CGFloat
     let windowNumber: Int?
     let displayNumber: Int? // For Cmd+1-9 shortcuts
+    /// False when the user has opted into app icons as the preview, where a corner badge of
+    /// the same icon would be redundant.
+    let showAppIconOverlay: Bool
     let onClose: (() -> Void)?
     let onMinimize: (() -> Void)?
 
@@ -229,7 +221,7 @@ struct WindowThumbnailView: View {
                 if let thumbnail = window.thumbnail {
                     Image(nsImage: thumbnail)
                         .resizable()
-                        .aspectRatio(contentMode: .fit)
+                        .scaledToFit()
                         .frame(width: thumbnailWidth, height: thumbnailHeight)
                         .cornerRadius(8)
                 } else {
@@ -244,7 +236,7 @@ struct WindowThumbnailView: View {
                 }
 
                 // App icon overlay in bottom-left corner (only when showing window previews)
-                if !isUsingAppIconsMode(), let appIcon = getAppIcon() {
+                if showAppIconOverlay, let appIcon = window.appIcon {
                     VStack {
                         Spacer()
                         HStack {
@@ -360,17 +352,6 @@ struct WindowThumbnailView: View {
             RoundedRectangle(cornerRadius: 16)
                 .fill(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
         )
-    }
-
-    private func getAppIcon() -> NSImage? {
-        guard let app = NSRunningApplication(processIdentifier: window.ownerPID) else {
-            return nil
-        }
-        return app.icon
-    }
-
-    private func isUsingAppIconsMode() -> Bool {
-        return UserDefaults.standard.bool(forKey: "useAppIcons")
     }
 }
 

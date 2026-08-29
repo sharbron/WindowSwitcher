@@ -27,6 +27,7 @@ Sources/WindowSwitcher/
 ├── WindowSwitcherApp.swift      # App entry, menu bar, delegate
 ├── AppState.swift               # State management
 ├── WindowInfo.swift             # Window data model & WindowManager
+├── ThumbnailCache.swift         # Window preview capture, downsampling & caching
 ├── KeyboardMonitor.swift        # Keyboard event handling
 ├── SwitcherCoordinator.swift    # Switching orchestration
 ├── WindowSwitcherView.swift     # Main UI view
@@ -44,7 +45,9 @@ Sources/WindowSwitcher/
 - **Layer 0 Filtering**: Only shows normal windows (excludes menu bars, dock, etc.)
 - **Size Filtering**: Filters out tiny windows (<100x100 pixels) to remove helper windows
 - **Smart Sorting**: Prioritizes windows with titles, then sorts alphabetically by app name
-- **Thumbnail Caching**: Background refresh every 2 seconds for instant display
+- **Thumbnail Caching**: Background refresh every 1 second, skipped while a pass is still running
+- **Downsampled Previews**: Captures are scaled to 640px wide on capture. Keeping the native
+  Retina bitmap costs ~20MB per window for an image never drawn wider than 300pt.
 
 ### User Experience
 - **Auto-Scroll**: Selected window stays centered when navigating many windows
@@ -56,6 +59,54 @@ Sources/WindowSwitcher/
 - **Accessibility**: Required for keyboard monitoring and window activation
 - **Screen Recording**: Optional for window previews (falls back to app icons)
 - Uses native macOS permission prompts only (no custom alerts)
+
+## Recent Improvements (2026-08-29)
+
+### Correctness Fixes
+1. ✅ **Window matching by bounds** — `kAXPositionAttribute` returns an opaque `AXValue`, so the
+   old `as? CGPoint` cast always failed and bounds matching never once succeeded. Every
+   activation silently fell back to exact-title matching, which cannot focus, close, or
+   minimize an untitled window. Now unwrapped via `AXValueGetValue`.
+2. ✅ **Selection vs. filtering** — `selectedIndex` indexed the unfiltered window list while the
+   view rendered a filtered, length-capped one, so searching (or exceeding "max windows to
+   show") highlighted one window and activated another. Filtering now lives in
+   `SwitcherCoordinator`; `selectedIndex` always addresses `displayedWindows`.
+3. ✅ **Event tap recovery** — the tap is now created with `tapDisabledByTimeout` /
+   `tapDisabledByUserInput` in its mask and re-enabled when they fire. macOS disables a slow
+   tap, which previously killed Cmd+Tab for the rest of the session with no indication.
+4. ✅ **First-launch permission** — the event tap is retried once Accessibility is granted
+   instead of being attempted once at launch, before the user has had a chance to approve.
+   A fresh install no longer requires a manual relaunch.
+5. ✅ **Rapid Cmd+Tab+Tab** — the monitor marks the switcher as showing on the tap thread when
+   it consumes the shortcut, so a fast second Tab is no longer read against stale state and
+   dropped.
+6. ✅ **Stuck switcher** — Cmd release is detected from the Tab-pressed flag alone, so a missed
+   key-down event can no longer leave the switcher open with no way to commit.
+7. ✅ **Fresh thumbnails now appear** — captures taken on open updated the model but never the
+   hosting controller's snapshot, so they only showed up after the next keypress.
+
+### Performance & Lifecycle
+8. ✅ **Downsampled captures** — see Thumbnail Caching above.
+9. ✅ **Bounded capture concurrency** — opening the switcher ran one concurrent global-queue
+   capture per window; it is now a single background pass with a generation token for
+   cancellation.
+10. ✅ **`deinit` trap** — `WindowManager.deinit` formed a `[weak self]` capture, which traps for
+    an object already deallocating.
+11. ✅ **Cache synchronization** — the thumbnail dictionary was read and written from different
+    threads unguarded.
+12. ✅ **Hosting controller reuse** — no longer rebuilt on every activation.
+13. ✅ **O(n² log n) sort** — recency ordering did a linear `firstIndex(of:)` per comparison;
+    now indexed once into a dictionary.
+14. ✅ **Per-render lookups removed** — app icons are resolved once during enumeration rather
+    than by an `NSRunningApplication` call inside a SwiftUI `body`.
+
+### Test & Lint Repair
+15. ✅ **Test suite compiles and passes** — it referenced `KeyboardMonitor.selectedIndex`, which
+    no longer exists (7 compile errors), and once fixed, crashed with SIGTRAP in
+    `testConcurrentWindowListUpdates`. That test wrote `@Published` state from 50 concurrent
+    queues and asserted it "should not crash"; the coordinator is main-thread-confined, so the
+    test has been replaced with ones that exercise the real contract.
+16. ✅ **SwiftLint clean** — was 1 error + 4 warnings.
 
 ## Recent Improvements (2025-11-08)
 
@@ -81,8 +132,10 @@ Sources/WindowSwitcher/
 6. ✅ **Compact Layout** - Reduced spacing for better multi-window experience
 
 ### Code Quality & Testing
-- ✅ **Test Coverage**: Increased from 0% to ~65% with comprehensive test suite
-- ✅ **Tests Added**: 120+ tests covering WindowInfo, AppState, WindowManager, KeyboardMonitor, SwitcherCoordinator, Preferences, and all new features
+- ✅ **Test Suite**: 161 tests covering WindowInfo, AppState, WindowManager, ThumbnailCache,
+  KeyboardMonitor, SwitcherCoordinator and Preferences. Verify with `swift test` — the suite
+  was unbuildable between 2025-11-08 and 2026-08-29, so treat any coverage figure as stale
+  unless you have just run it.
 - ✅ **Code Review**: Comprehensive review with CODE_REVIEW.md documenting all issues
 - ✅ **SwiftLint**: Integration with passing checks
 - ✅ **Documentation**: Added TEST_PLAN.md, PREFERENCES_REVIEW.md, Tests/README.md
@@ -137,7 +190,8 @@ No special entitlements required for unsigned builds. For distribution, add code
 ## Known Limitations
 
 1. **Screen Recording Permission**: Required for window previews. Falls back to app icons if denied.
-2. **Window Matching**: Uses bounds + title matching. May fail for rapidly resizing windows.
+2. **Window Matching**: Uses bounds (5pt tolerance) then exact title as a fallback. May fail for
+   rapidly resizing windows.
 3. **Protected Windows**: Cannot capture thumbnails of some system windows.
 4. **Performance**: May degrade with >50 windows (configurable limit).
 
@@ -145,7 +199,8 @@ No special entitlements required for unsigned builds. For distribution, add code
 
 ### Cmd+Tab Not Working
 - Check Accessibility permission: System Settings > Privacy & Security > Accessibility
-- Restart the app after granting permission
+- The app polls for the permission and starts monitoring on its own once granted; a restart
+  should not be necessary
 - Check Console.app for error logs from "com.windowswitcher"
 
 ### No Window Previews
@@ -185,7 +240,7 @@ log stream --predicate 'subsystem == "com.windowswitcher"' --level debug
 ```
 
 ### Code Style
-- SwiftLint enforced (1 acceptable warning: function body length)
+- SwiftLint enforced (clean — no errors or warnings)
 - No force unwraps or force casts
 - Proper error handling with os.log Logger
 - Swift concurrency (@MainActor, async/await) where appropriate
@@ -222,6 +277,11 @@ Users must run: `xattr -cr /Applications/WindowSwitcher.app` on first install.
 ### Technical Debt
 - ✅ ~~Add unit tests for WindowManager and KeyboardMonitor~~ (COMPLETED)
 - ✅ ~~Consider refactoring activateWindow~~ (COMPLETED - split into 8 methods)
+- [ ] **Migrate off `CGWindowListCreateImage`** — deprecated as of macOS 14 in favour of
+      ScreenCaptureKit. Still functional, but it is an async API with a different permission
+      model, so this is a project rather than a patch.
+- [ ] Consider annotating `SwitcherCoordinator` as `@MainActor` to make its main-thread
+      confinement compiler-enforced rather than conventional.
 - [ ] Add integration tests for permission handling
 - [ ] Document public APIs with doc comments
 - [ ] Add performance benchmarks for thumbnail capture
@@ -249,5 +309,5 @@ Users must run: `xattr -cr /Applications/WindowSwitcher.app` on first install.
 
 ---
 
-*Last Updated: 2025-11-08*
-*Project Version: 1.1*
+*Last Updated: 2026-08-29*
+*Project Version: 1.0 (CFBundleShortVersionString)*

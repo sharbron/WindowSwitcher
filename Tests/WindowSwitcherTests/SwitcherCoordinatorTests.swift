@@ -282,7 +282,7 @@ final class SwitcherCoordinatorTests: XCTestCase {
     func testCoordinatorDeallocation() {
         // Given: A coordinator that will be deallocated
         var testCoordinator: SwitcherCoordinator? = SwitcherCoordinator()
-        weak var weakCoordinator = testCoordinator
+        weak let weakCoordinator = testCoordinator
 
         // When: Releasing strong reference
         testCoordinator = nil
@@ -303,60 +303,124 @@ final class SwitcherCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.windows.count, 0)
     }
 
-    // MARK: - Concurrent Access Tests
+    // MARK: - Threading Contract Tests
 
-    func testConcurrentStateUpdates() {
-        // Test that concurrent updates don't crash
+    // SwitcherCoordinator is main-thread-confined: every mutation reaches it from the event
+    // tap via DispatchQueue.main.async. These tests exercise that contract under load.
+    // (Writing @Published state from several background queues at once is a data race that
+    // traps in the Swift runtime — it is not a scenario the app can produce, so asserting
+    // "it doesn't crash" only ever tested the test.)
+
+    func testRapidSequentialStateUpdates() {
         let expectation = XCTestExpectation(description: "All updates complete")
         let updateCount = 100
-        var completedUpdates = 0
-        let lock = NSLock()
 
         for index in 0..<updateCount {
-            DispatchQueue.global().async {
+            DispatchQueue.main.async {
                 self.coordinator.selectedIndex = index
                 self.coordinator.isShowingSwitcher = (index % 2 == 0)
-
-                lock.lock()
-                completedUpdates += 1
-                if completedUpdates == updateCount {
+                if index == updateCount - 1 {
                     expectation.fulfill()
                 }
-                lock.unlock()
             }
         }
 
         wait(for: [expectation], timeout: 5.0)
 
-        // Then: Should not crash
-        XCTAssertTrue(true, "Concurrent updates should not crash")
+        XCTAssertEqual(coordinator.selectedIndex, updateCount - 1, "Last write should win")
+        XCTAssertFalse(coordinator.isShowingSwitcher, "Last write should win")
     }
 
-    func testConcurrentWindowListUpdates() {
-        // Test concurrent window list updates
+    func testRapidWindowListUpdates() {
         let expectation = XCTestExpectation(description: "All window updates complete")
         let updateCount = 50
-        var completedUpdates = 0
-        let lock = NSLock()
 
         for index in 0..<updateCount {
-            DispatchQueue.global().async {
-                let windows = (1...10).map { self.createTestWindow(id: CGWindowID($0 + index * 10)) }
-                self.coordinator.windows = windows
-
-                lock.lock()
-                completedUpdates += 1
-                if completedUpdates == updateCount {
+            DispatchQueue.main.async {
+                self.coordinator.windows = (1...10).map {
+                    self.createTestWindow(id: CGWindowID($0 + index * 10))
+                }
+                if index == updateCount - 1 {
                     expectation.fulfill()
                 }
-                lock.unlock()
             }
         }
 
         wait(for: [expectation], timeout: 5.0)
 
-        // Then: Should not crash and have some windows
-        XCTAssertTrue(true, "Concurrent window list updates should not crash")
+        XCTAssertEqual(coordinator.windows.count, 10)
+        XCTAssertEqual(coordinator.windows.first?.id, CGWindowID(1 + (updateCount - 1) * 10))
+    }
+
+    // MARK: - Displayed Window List Tests
+
+    // selectedIndex indexes displayedWindows, not the full `windows` array. If these two ever
+    // disagree the switcher highlights one window and activates a different one.
+
+    func testDisplayedWindowsMatchesAllWindowsWithoutSearch() {
+        coordinator.windows = (1...5).map { createTestWindow(id: CGWindowID($0)) }
+
+        XCTAssertEqual(coordinator.displayedWindows.count, 5)
+        XCTAssertEqual(coordinator.matchingWindowCount, 5)
+    }
+
+    func testSearchFiltersDisplayedWindowsByTitle() {
+        coordinator.windows = [
+            createTestWindow(id: 1, title: "Inbox", appName: "Mail"),
+            createTestWindow(id: 2, title: "Release notes", appName: "Safari"),
+            createTestWindow(id: 3, title: "Draft", appName: "Mail")
+        ]
+        coordinator.searchQuery = "release"
+
+        XCTAssertEqual(coordinator.displayedWindows.map(\.id), [2])
+        XCTAssertEqual(coordinator.matchingWindowCount, 1)
+    }
+
+    func testSearchFiltersDisplayedWindowsByAppName() {
+        coordinator.windows = [
+            createTestWindow(id: 1, title: "Inbox", appName: "Mail"),
+            createTestWindow(id: 2, title: "Release notes", appName: "Safari"),
+            createTestWindow(id: 3, title: "Draft", appName: "Mail")
+        ]
+        coordinator.searchQuery = "mail"
+
+        XCTAssertEqual(coordinator.displayedWindows.map(\.id), [1, 3])
+        XCTAssertEqual(coordinator.matchingWindowCount, 2)
+    }
+
+    func testSelectedIndexAddressesFilteredList() {
+        coordinator.windows = [
+            createTestWindow(id: 1, title: "Inbox", appName: "Mail"),
+            createTestWindow(id: 2, title: "Release notes", appName: "Safari"),
+            createTestWindow(id: 3, title: "Draft", appName: "Mail")
+        ]
+        coordinator.searchQuery = "mail"
+        coordinator.selectedIndex = 1
+
+        // Index 1 of the *filtered* list is window 3, not window 2 (index 1 of the full list).
+        let selected = coordinator.displayedWindows[coordinator.selectedIndex]
+        XCTAssertEqual(selected.id, 3, "Selection must address the list the user can see")
+    }
+
+    func testSearchWithNoMatchesShowsNothing() {
+        coordinator.windows = (1...5).map { createTestWindow(id: CGWindowID($0), appName: "Mail") }
+        coordinator.searchQuery = "nonexistent"
+
+        XCTAssertTrue(coordinator.displayedWindows.isEmpty)
+        XCTAssertEqual(coordinator.matchingWindowCount, 0)
+    }
+
+    func testDisplayLimitTruncatesDisplayedWindowsButNotMatchCount() {
+        let defaults = UserDefaults(suiteName: "SwitcherCoordinatorTests.displayLimit")!
+        defaults.removePersistentDomain(forName: "SwitcherCoordinatorTests.displayLimit")
+        defaults.set(5.0, forKey: "maxWindowsToShow")
+        defer { defaults.removePersistentDomain(forName: "SwitcherCoordinatorTests.displayLimit") }
+
+        let limited = SwitcherCoordinator(userDefaults: defaults)
+        limited.windows = (1...12).map { createTestWindow(id: CGWindowID($0)) }
+
+        XCTAssertEqual(limited.displayedWindows.count, 5, "Display limit should be honoured")
+        XCTAssertEqual(limited.matchingWindowCount, 12, "Match count reports the pre-limit total")
     }
 
     // MARK: - Edge Case Tests

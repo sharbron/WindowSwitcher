@@ -23,7 +23,6 @@ final class KeyboardMonitorTests: XCTestCase {
     func testInitialState() {
         // Then: Initial state should be correct
         XCTAssertFalse(keyboardMonitor.isShowingSwitcher, "Switcher should not be showing initially")
-        XCTAssertEqual(keyboardMonitor.selectedIndex, 0, "Selected index should be 0 initially")
     }
 
     // MARK: - Callback Tests
@@ -115,23 +114,6 @@ final class KeyboardMonitorTests: XCTestCase {
 
         // Then: State should be updated
         XCTAssertFalse(keyboardMonitor.isShowingSwitcher)
-    }
-
-    func testSelectedIndexModification() {
-        // Given: Initial state
-        XCTAssertEqual(keyboardMonitor.selectedIndex, 0)
-
-        // When: Changing selected index
-        keyboardMonitor.selectedIndex = 5
-
-        // Then: State should be updated
-        XCTAssertEqual(keyboardMonitor.selectedIndex, 5)
-
-        // When: Setting to another value
-        keyboardMonitor.selectedIndex = 10
-
-        // Then: State should be updated
-        XCTAssertEqual(keyboardMonitor.selectedIndex, 10)
     }
 
     // MARK: - Callback Ordering Tests
@@ -365,7 +347,6 @@ final class KeyboardMonitorTests: XCTestCase {
         measure {
             for index in 0..<1000 {
                 keyboardMonitor.isShowingSwitcher = (index % 2 == 0)
-                keyboardMonitor.selectedIndex = index
             }
         }
     }

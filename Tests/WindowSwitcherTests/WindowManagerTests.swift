@@ -210,3 +210,111 @@ extension WindowManagerTests {
         }
     }
 }
+
+// MARK: - Thumbnail Downsampling Tests
+
+/// Window captures arrive at native Retina resolution — roughly 20MB per window — while the
+/// switcher never draws one wider than 300pt. These cover the scaling that keeps a screenful
+/// of previews from costing hundreds of megabytes.
+final class ThumbnailCacheTests: XCTestCase {
+
+    private var cache: ThumbnailCache!
+
+    override func setUp() {
+        super.setUp()
+        cache = ThumbnailCache(userDefaults: UserDefaults(suiteName: "ThumbnailCacheTests")!)
+    }
+
+    override func tearDown() {
+        UserDefaults.standard.removePersistentDomain(forName: "ThumbnailCacheTests")
+        cache = nil
+        super.tearDown()
+    }
+
+    private func makeImage(width: Int, height: Int) -> CGImage {
+        let bitmapInfo = CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+        let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: bitmapInfo
+        )!
+        context.setFillColor(CGColor(red: 0.2, green: 0.4, blue: 0.8, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage()!
+    }
+
+    func testOversizedCaptureIsScaledDown() {
+        // A 1440x900pt window on a 2x display.
+        let source = makeImage(width: 2880, height: 1800)
+        let result = cache.downsampled(source, maxPixelWidth: 640)
+
+        XCTAssertEqual(result.size.width, 640, "Should scale to the requested width")
+        XCTAssertEqual(result.size.height, 400, "Should preserve the aspect ratio")
+    }
+
+    func testSmallCaptureIsLeftAlone() {
+        let source = makeImage(width: 320, height: 240)
+        let result = cache.downsampled(source, maxPixelWidth: 640)
+
+        XCTAssertEqual(result.size.width, 320, "Images already under the limit should not be upscaled")
+        XCTAssertEqual(result.size.height, 240)
+    }
+
+    func testCaptureAtExactlyTheLimitIsLeftAlone() {
+        let source = makeImage(width: 640, height: 480)
+        let result = cache.downsampled(source, maxPixelWidth: 640)
+
+        XCTAssertEqual(result.size.width, 640)
+        XCTAssertEqual(result.size.height, 480)
+    }
+
+    func testExtremeAspectRatioKeepsAtLeastOnePixelOfHeight() {
+        let source = makeImage(width: 4000, height: 2)
+        let result = cache.downsampled(source, maxPixelWidth: 640)
+
+        XCTAssertEqual(result.size.width, 640)
+        XCTAssertGreaterThanOrEqual(result.size.height, 1, "Height must never round down to zero")
+    }
+
+    func testAppIconPreferencyReturnsIconInsteadOfCapture() {
+        let defaults = UserDefaults(suiteName: "ThumbnailCacheTests.icons")!
+        defaults.removePersistentDomain(forName: "ThumbnailCacheTests.icons")
+        defaults.set(true, forKey: "useAppIcons")
+        defer { defaults.removePersistentDomain(forName: "ThumbnailCacheTests.icons") }
+
+        let iconCache = ThumbnailCache(userDefaults: defaults)
+        let icon = NSImage(systemSymbolName: "star", accessibilityDescription: nil)
+        let window = WindowInfo(
+            id: 1,
+            ownerPID: 1000,
+            title: "Test",
+            appName: "TestApp",
+            bounds: CGRect(x: 0, y: 0, width: 800, height: 600),
+            layer: 0,
+            isOnScreen: true,
+            thumbnail: nil,
+            appIcon: icon
+        )
+
+        XCTAssertIdentical(iconCache.capture(window), icon, "Should return the cached app icon, not a capture")
+    }
+
+    func testAppIconFallsBackToSymbolForUnknownProcess() {
+        let window = WindowInfo(
+            id: 1,
+            ownerPID: -1,
+            title: "Gone",
+            appName: "Gone",
+            bounds: .zero,
+            layer: 0,
+            isOnScreen: false,
+            thumbnail: nil
+        )
+
+        XCTAssertNotNil(ThumbnailCache.appIcon(for: window), "A placeholder icon should always be available")
+    }
+}

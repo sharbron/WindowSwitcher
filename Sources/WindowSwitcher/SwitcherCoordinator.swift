@@ -3,7 +3,11 @@ import Cocoa
 import os.log
 
 class SwitcherCoordinator: ObservableObject {
+    /// Every window currently open, in recency order. This is the source list; the switcher
+    /// displays `displayedWindows`, which applies the search filter and the display limit.
     @Published var windows: [WindowInfo] = []
+    /// Index into `displayedWindows` — NOT into `windows`. Selection must be expressed in the
+    /// same terms the user sees, or Tab highlights one window and activates another.
     @Published var selectedIndex = 0
     @Published var isShowingSwitcher = false
     @Published var searchQuery = ""
@@ -14,8 +18,44 @@ class SwitcherCoordinator: ObservableObject {
     private var hostingController: NSHostingController<WindowSwitcherView>?
     private let logger = Logger(subsystem: "com.windowswitcher", category: "SwitcherCoordinator")
 
-    init() {
+    private static let defaultMaxWindowsToShow = 20
+
+    /// Bumped whenever the switcher opens or closes, so an in-flight background capture pass
+    /// can tell that its results are no longer wanted. Guarded by captureGenerationLock.
+    private var captureGeneration = 0
+    private let captureGenerationLock = NSLock()
+
+    private let userDefaults: UserDefaults
+
+    init(userDefaults: UserDefaults = .standard) {
+        self.userDefaults = userDefaults
         setupKeyboardMonitor()
+    }
+
+    // MARK: - Displayed Window List
+
+    /// Windows matching the current search query.
+    private var filteredWindows: [WindowInfo] {
+        guard !searchQuery.isEmpty else { return windows }
+        return windows.filter { window in
+            window.title.localizedCaseInsensitiveContains(searchQuery) ||
+            window.appName.localizedCaseInsensitiveContains(searchQuery)
+        }
+    }
+
+    /// Number of windows matching the search, before the display limit is applied.
+    var matchingWindowCount: Int {
+        filteredWindows.count
+    }
+
+    private var maxWindowsToShow: Int {
+        let stored = userDefaults.double(forKey: "maxWindowsToShow")
+        return stored > 0 ? Int(stored) : Self.defaultMaxWindowsToShow
+    }
+
+    /// Exactly what the switcher renders. `selectedIndex` indexes into this.
+    var displayedWindows: [WindowInfo] {
+        Array(filteredWindows.prefix(maxWindowsToShow))
     }
 
     private func setupKeyboardMonitor() {
@@ -50,9 +90,30 @@ class SwitcherCoordinator: ObservableObject {
         keyboardMonitor.onNumberPressed = { [weak self] number in
             self?.handleNumberKey(number)
         }
+    }
 
+    /// Begins listening for Cmd+Tab. Returns false if Accessibility permission is missing.
+    @discardableResult
+    func startMonitoring() -> Bool {
         keyboardMonitor.startMonitoring()
     }
+
+    private func currentCaptureGeneration() -> Int {
+        captureGenerationLock.lock()
+        defer { captureGenerationLock.unlock() }
+        return captureGeneration
+    }
+
+    /// Abandons any background capture pass that is still running.
+    @discardableResult
+    private func invalidateInFlightCaptures() -> Int {
+        captureGenerationLock.lock()
+        defer { captureGenerationLock.unlock() }
+        captureGeneration += 1
+        return captureGeneration
+    }
+
+    // MARK: - Showing and Hiding
 
     private func showSwitcher() {
         // If switcher is already showing, don't show it again (user is holding Cmd)
@@ -76,6 +137,9 @@ class SwitcherCoordinator: ObservableObject {
         guard !updatedWindows.isEmpty else {
             logger.warning("No windows available to display")
             windowManager.stopCacheRefresh()
+            // The monitor optimistically marked the switcher as showing when it consumed the
+            // Cmd+Tab; undo that or every later keystroke gets swallowed.
+            keyboardMonitor.isShowingSwitcher = false
             return
         }
 
@@ -98,25 +162,54 @@ class SwitcherCoordinator: ObservableObject {
         // Create and show switcher window
         displaySwitcherWindow()
 
-        // Capture fresh thumbnails for all windows when switcher opens
-        // This ensures previews are always up-to-date
-        for (index, window) in updatedWindows.enumerated() {
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                guard let self = self else { return }
+        captureFreshThumbnails(for: updatedWindows, generation: invalidateInFlightCaptures())
+    }
 
-                if let thumbnail = self.windowManager.captureWindowThumbnail(window) {
-                    DispatchQueue.main.async { [weak self] in
-                        guard let self = self,
-                              self.isShowingSwitcher,
-                              index < self.windows.count,
-                              self.windows[index].id == window.id else { return }
+    /// Refreshes every thumbnail once on open, so previews are current rather than up to a
+    /// refresh-interval stale.
+    ///
+    /// Runs as a single background pass rather than one `async` block per window: dispatching
+    /// N concurrent screen captures onto the global queue spawns a thread each and starves the
+    /// pool. Results are published one at a time so the UI still fills in progressively.
+    private func captureFreshThumbnails(for windowsToCapture: [WindowInfo], generation: Int) {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
 
-                        // Update with fresh thumbnail
-                        self.windows[index].thumbnail = thumbnail
-                    }
+            for window in windowsToCapture {
+                // Bail out as soon as this pass is superseded (switcher closed or reopened).
+                guard self.currentCaptureGeneration() == generation else { return }
+
+                guard let thumbnail = self.windowManager.captureWindowThumbnail(window) else { continue }
+
+                DispatchQueue.main.async {
+                    guard self.currentCaptureGeneration() == generation,
+                          self.isShowingSwitcher,
+                          let index = self.windows.firstIndex(where: { $0.id == window.id }) else { return }
+                    self.windows[index].thumbnail = thumbnail
+                    // Push the new image into the live view — mutating `windows` alone does
+                    // nothing, since the hosting controller holds a snapshot struct.
+                    self.updateSwitcherView()
                 }
             }
         }
+    }
+
+    private func makeRootView() -> WindowSwitcherView {
+        WindowSwitcherView(
+            windows: displayedWindows,
+            selectedIndex: selectedIndex,
+            matchingWindowCount: matchingWindowCount,
+            onSelect: { [weak self] selectedWindow in
+                self?.activateWindow(selectedWindow)
+            },
+            searchQuery: searchQuery,
+            onCloseWindow: { [weak self] window in
+                self?.closeWindow(window)
+            },
+            onMinimizeWindow: { [weak self] window in
+                self?.minimizeWindow(window)
+            }
+        )
     }
 
     private func displaySwitcherWindow() {
@@ -126,41 +219,14 @@ class SwitcherCoordinator: ObservableObject {
 
         guard let window = switcherWindow else { return }
 
-        // Create hosting controller once if it doesn't exist
+        // Reuse the hosting controller across activations. Recreating it rebuilds the whole
+        // SwiftUI hierarchy on every Cmd+Tab, and the old one stays alive anyway for as long
+        // as the window holds it as its contentViewController.
         if hostingController == nil {
-            hostingController = NSHostingController(
-                rootView: WindowSwitcherView(
-                    windows: windows,
-                    selectedIndex: selectedIndex,
-                    onSelect: { [weak self] selectedWindow in
-                        self?.activateWindow(selectedWindow)
-                    },
-                    searchQuery: searchQuery,
-                    onCloseWindow: { [weak self] window in
-                        self?.closeWindow(window)
-                    },
-                    onMinimizeWindow: { [weak self] window in
-                        self?.minimizeWindow(window)
-                    }
-                )
-            )
+            hostingController = NSHostingController(rootView: makeRootView())
             window.contentViewController = hostingController
         } else {
-            // Update existing hosting controller's root view
-            hostingController?.rootView = WindowSwitcherView(
-                windows: windows,
-                selectedIndex: selectedIndex,
-                onSelect: { [weak self] selectedWindow in
-                    self?.activateWindow(selectedWindow)
-                },
-                searchQuery: searchQuery,
-                onCloseWindow: { [weak self] window in
-                    self?.closeWindow(window)
-                },
-                onMinimizeWindow: { [weak self] window in
-                    self?.minimizeWindow(window)
-                }
-            )
+            hostingController?.rootView = makeRootView()
         }
 
         // Calculate and set window size - limit to 90% of screen width
@@ -183,18 +249,20 @@ class SwitcherCoordinator: ObservableObject {
         window.makeKeyAndOrderFront(nil)
     }
 
+    // MARK: - Selection
+
     private func selectNext() {
-        logger.info("selectNext called, isShowingSwitcher: \(self.isShowingSwitcher)")
-        guard !windows.isEmpty else { return }
-        selectedIndex = (selectedIndex + 1) % windows.count
+        let count = displayedWindows.count
+        guard count > 0 else { return }
+        selectedIndex = (selectedIndex + 1) % count
         logger.info("Advanced to window index: \(self.selectedIndex)")
         updateSwitcherView()
     }
 
     private func selectPrevious() {
-        logger.info("selectPrevious called, isShowingSwitcher: \(self.isShowingSwitcher)")
-        guard !windows.isEmpty else { return }
-        selectedIndex = (selectedIndex - 1 + windows.count) % windows.count
+        let count = displayedWindows.count
+        guard count > 0 else { return }
+        selectedIndex = (selectedIndex - 1 + count) % count
         logger.info("Went back to window index: \(self.selectedIndex)")
         updateSwitcherView()
     }
@@ -203,21 +271,7 @@ class SwitcherCoordinator: ObservableObject {
         guard hostingController != nil else { return }
 
         // Reuse existing hosting controller - just update the root view
-        // This prevents memory leaks from creating new controllers every Tab press
-        hostingController?.rootView = WindowSwitcherView(
-            windows: windows,
-            selectedIndex: selectedIndex,
-            onSelect: { [weak self] selectedWindow in
-                self?.activateWindow(selectedWindow)
-            },
-            searchQuery: searchQuery,
-            onCloseWindow: { [weak self] window in
-                self?.closeWindow(window)
-            },
-            onMinimizeWindow: { [weak self] window in
-                self?.minimizeWindow(window)
-            }
-        )
+        hostingController?.rootView = makeRootView()
 
         // Don't resize window when just changing selection - keep the same size
         // This prevents shaking/jittering when cycling through windows
@@ -225,13 +279,13 @@ class SwitcherCoordinator: ObservableObject {
     }
 
     private func activateSelectedWindow() {
-        guard isShowingSwitcher, !windows.isEmpty, selectedIndex < windows.count else {
+        let visible = displayedWindows
+        guard isShowingSwitcher, selectedIndex >= 0, selectedIndex < visible.count else {
             hideSwitcher()
             return
         }
 
-        let selectedWindow = windows[selectedIndex]
-        activateWindow(selectedWindow)
+        activateWindow(visible[selectedIndex])
     }
 
     private func activateWindow(_ window: WindowInfo) {
@@ -241,12 +295,12 @@ class SwitcherCoordinator: ObservableObject {
 
     private func hideSwitcher() {
         logger.info("Hiding switcher")
+        invalidateInFlightCaptures()
         isShowingSwitcher = false
         keyboardMonitor.isShowingSwitcher = false
         searchQuery = "" // Reset search on hide
+        selectedIndex = 0
         switcherWindow?.orderOut(nil)
-        // Clear hosting controller to free memory when switcher is hidden
-        hostingController = nil
         // Stop thumbnail caching when switcher is hidden
         windowManager.stopCacheRefresh()
     }
@@ -281,54 +335,46 @@ class SwitcherCoordinator: ObservableObject {
 
     private func handleNumberKey(_ number: Int) {
         guard isShowingSwitcher else { return }
-        guard number >= 0 && number < windows.count else {
-            logger.warning("Number key \(number + 1) pressed but only \(self.windows.count) windows available")
+
+        // Index the visible list — the number badges are drawn over the filtered windows.
+        let visible = displayedWindows
+        guard number >= 0 && number < visible.count else {
+            logger.warning("Number key \(number + 1) pressed but only \(visible.count) windows shown")
             return
         }
 
         logger.info("Activating window \(number + 1) via number key")
-        let targetWindow = windows[number]
-        activateWindow(targetWindow)
+        activateWindow(visible[number])
     }
 
     // MARK: - Window Actions
 
     private func closeWindow(_ window: WindowInfo) {
         logger.info("Closing window: \(window.title)")
-
         windowManager.closeWindow(window)
-
-        // Remove from list and update view
-        windows.removeAll { $0.id == window.id }
-
-        if windows.isEmpty {
-            hideSwitcher()
-        } else {
-            // Adjust selected index if needed
-            if selectedIndex >= windows.count {
-                selectedIndex = windows.count - 1
-            }
-            updateSwitcherView()
-        }
+        removeWindowFromList(window)
     }
 
     private func minimizeWindow(_ window: WindowInfo) {
         logger.info("Minimizing window: \(window.title)")
-
         windowManager.minimizeWindow(window)
+        removeWindowFromList(window)
+    }
 
-        // Remove from list and update view
+    private func removeWindowFromList(_ window: WindowInfo) {
         windows.removeAll { $0.id == window.id }
 
-        if windows.isEmpty {
+        let remaining = displayedWindows.count
+        if remaining == 0 {
             hideSwitcher()
-        } else {
-            // Adjust selected index if needed
-            if selectedIndex >= windows.count {
-                selectedIndex = windows.count - 1
-            }
-            updateSwitcherView()
+            return
         }
+
+        // Clamp against the visible list, which is what selectedIndex refers to.
+        if selectedIndex >= remaining {
+            selectedIndex = remaining - 1
+        }
+        updateSwitcherView()
     }
 
     deinit {

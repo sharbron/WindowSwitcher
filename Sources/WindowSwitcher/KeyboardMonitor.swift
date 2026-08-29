@@ -20,10 +20,19 @@ class KeyboardMonitor: ObservableObject {
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
-    private var cmdKeyIsDown = false
     private var tabKeyWasPressed = false
     private let logger = Logger(subsystem: "com.windowswitcher", category: "KeyboardMonitor")
     private let stateLock = NSLock()
+
+    // Key codes
+    private static let tabKey: Int64 = 48
+    private static let escapeKey: Int64 = 53
+    private static let backspaceKey: Int64 = 51
+
+    /// Cmd+1 through Cmd+9 mapped to zero-based window indices.
+    private static let numberKeyMap: [Int64: Int] = [
+        18: 0, 19: 1, 20: 2, 21: 3, 23: 4, 22: 5, 26: 6, 28: 7, 25: 8
+    ]
 
     var onCmdTabPressed: (() -> Void)?
     var onTabPressed: (() -> Void)?
@@ -34,11 +43,22 @@ class KeyboardMonitor: ObservableObject {
     var onBackspacePressed: (() -> Void)?
     var onNumberPressed: ((Int) -> Void)?
 
-    func startMonitoring() {
-        // Create event tap
+    /// Starts intercepting keyboard events.
+    ///
+    /// Must be called from the main thread — the run loop source is attached to the current
+    /// run loop, and `stopMonitoring()` detaches it from the main one.
+    /// - Returns: `false` if the tap could not be created, which in practice means
+    ///   Accessibility permission has not been granted yet.
+    @discardableResult
+    func startMonitoring() -> Bool {
+        // Include the tap-disabled events so a disabled tap can be revived. macOS silently
+        // disables a tap whose callback overruns its time budget; without this the app stops
+        // responding to Cmd+Tab for the rest of the session.
         let eventMask = (1 << CGEventType.keyDown.rawValue) |
                         (1 << CGEventType.keyUp.rawValue) |
-                        (1 << CGEventType.flagsChanged.rawValue)
+                        (1 << CGEventType.flagsChanged.rawValue) |
+                        (1 << CGEventType.tapDisabledByTimeout.rawValue) |
+                        (1 << CGEventType.tapDisabledByUserInput.rawValue)
 
         guard let eventTap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
@@ -53,167 +73,190 @@ class KeyboardMonitor: ObservableObject {
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else {
             logger.error("Failed to create event tap. Check Accessibility permissions.")
-            return
+            return false
         }
 
+        stateLock.lock()
         self.eventTap = eventTap
+        stateLock.unlock()
 
         runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, eventTap, 0)
-        CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
+        CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
         CGEvent.tapEnable(tap: eventTap, enable: true)
 
         logger.info("Keyboard monitoring started successfully")
+        return true
     }
 
     func stopMonitoring() {
         logger.info("Stopping keyboard monitoring")
-        if let eventTap = eventTap {
-            CGEvent.tapEnable(tap: eventTap, enable: false)
+
+        stateLock.lock()
+        let tap = eventTap
+        eventTap = nil
+        stateLock.unlock()
+
+        if let tap = tap {
+            CGEvent.tapEnable(tap: tap, enable: false)
         }
         if let runLoopSource = runLoopSource {
             // Use CFRunLoopGetMain() — the source was added to the main run loop in startMonitoring()
             // Using CFRunLoopGetCurrent() here would fail if called from a non-main thread (e.g. deinit)
             CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
+            CFRunLoopSourceInvalidate(runLoopSource)
+        }
+        if let tap = tap {
+            CFMachPortInvalidate(tap)
+        }
+        runLoopSource = nil
+    }
+
+    // MARK: - Event Handling
+
+    private func handleEvent(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        switch type {
+        case .tapDisabledByTimeout, .tapDisabledByUserInput:
+            reenableTap(reason: type)
+            return nil
+        case .flagsChanged:
+            return handleFlagsChanged(event: event)
+        case .keyDown:
+            return handleKeyDown(event: event)
+        default:
+            return Unmanaged.passUnretained(event)
         }
     }
 
-    private func handleEvent(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
-        // Handle flags changed (for Cmd key)
-        if type == .flagsChanged {
-            let flags = event.flags
-            let cmdPressed = flags.contains(.maskCommand)
+    /// The system disables an event tap if its callback is too slow, or on certain user input.
+    /// Re-enabling restores Cmd+Tab instead of leaving the app permanently deaf.
+    private func reenableTap(reason: CGEventType) {
+        stateLock.lock()
+        let tap = eventTap
+        stateLock.unlock()
 
-            stateLock.lock()
-            let shouldRelease = cmdKeyIsDown && !cmdPressed && tabKeyWasPressed
-            if shouldRelease {
-                cmdKeyIsDown = false
-                tabKeyWasPressed = false
-            } else {
-                cmdKeyIsDown = cmdPressed
-            }
-            stateLock.unlock()
+        guard let tap = tap else { return }
+        logger.warning("Event tap was disabled (reason: \(reason.rawValue)); re-enabling")
+        CGEvent.tapEnable(tap: tap, enable: true)
+    }
 
-            // Cmd key was released
-            if shouldRelease {
-                DispatchQueue.main.async {
-                    self.onCmdReleased?()
-                }
-                return nil // Consume the event
-            }
+    private func handleFlagsChanged(event: CGEvent) -> Unmanaged<CGEvent>? {
+        let cmdPressed = event.flags.contains(.maskCommand)
+
+        // Treat any loss of Cmd after a Tab press as the commit gesture. Tracking a separate
+        // "cmd is down" flag meant a missed key-down event left the switcher stuck open with
+        // no way to dismiss it.
+        stateLock.lock()
+        let shouldRelease = !cmdPressed && tabKeyWasPressed
+        if shouldRelease {
+            tabKeyWasPressed = false
         }
+        stateLock.unlock()
 
-        // Handle key down events
-        if type == .keyDown {
-            let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
-            let flags = event.flags
-
-            // Tab key (keycode 48)
-            if keyCode == 48 && flags.contains(.maskCommand) {
-                stateLock.lock()
-                tabKeyWasPressed = true
-                let switcherShowing = _isShowingSwitcher
-                stateLock.unlock()
-
-                logger.info("Cmd+Tab detected. isShowingSwitcher=\(switcherShowing), hasShift=\(flags.contains(.maskShift))")
-
-                DispatchQueue.main.async {
-                    if flags.contains(.maskShift) {
-                        self.logger.info("Calling onShiftTabPressed")
-                        self.onShiftTabPressed?()
-                    } else {
-                        if !switcherShowing {
-                            self.logger.info("Calling onCmdTabPressed (switcher not showing)")
-                            self.onCmdTabPressed?()
-                        } else {
-                            self.logger.info("Calling onTabPressed (switcher already showing)")
-                            self.onTabPressed?()
-                        }
-                    }
-                }
-
-                return nil // Consume the event to prevent default behavior
+        if shouldRelease {
+            DispatchQueue.main.async {
+                self.onCmdReleased?()
             }
-
-            // Escape key (keycode 53) - dismiss switcher if showing
-            stateLock.lock()
-            let switcherShowing = _isShowingSwitcher
-            stateLock.unlock()
-
-            if keyCode == 53 && switcherShowing {
-                stateLock.lock()
-                cmdKeyIsDown = false
-                tabKeyWasPressed = false
-                stateLock.unlock()
-
-                DispatchQueue.main.async {
-                    self.onEscapePressed?()
-                }
-
-                return nil // Consume the event
-            }
-
-            // Backspace key (keycode 51) - handle search backspace
-            if keyCode == 51 && isShowingSwitcher && !flags.contains(.maskCommand) {
-                DispatchQueue.main.async {
-                    self.onBackspacePressed?()
-                }
-
-                return nil // Consume the event
-            }
-
-            // Number keys (Cmd+1 through Cmd+9) for direct window access
-            // Keycodes: 18=1, 19=2, 20=3, 21=4, 23=5, 22=6, 26=7, 28=8, 25=9
-            if isShowingSwitcher && flags.contains(.maskCommand) {
-                let numberKeyMap: [Int64: Int] = [
-                    18: 0, // Cmd+1 -> index 0
-                    19: 1, // Cmd+2 -> index 1
-                    20: 2, // Cmd+3 -> index 2
-                    21: 3, // Cmd+4 -> index 3
-                    23: 4, // Cmd+5 -> index 4
-                    22: 5, // Cmd+6 -> index 5
-                    26: 6, // Cmd+7 -> index 6
-                    28: 7, // Cmd+8 -> index 7
-                    25: 8  // Cmd+9 -> index 8
-                ]
-
-                if let windowIndex = numberKeyMap[keyCode] {
-                    DispatchQueue.main.async {
-                        self.onNumberPressed?(windowIndex)
-                    }
-
-                    return nil // Consume the event
-                }
-            }
-
-            // Character typing for search (when switcher is showing, no Cmd key)
-            if isShowingSwitcher && !flags.contains(.maskCommand) {
-                // Get Unicode string from keyboard event
-                var length = 0
-                event.keyboardGetUnicodeString(maxStringLength: 4, actualStringLength: &length, unicodeString: nil)
-
-                if length > 0 {
-                    var chars = [UniChar](repeating: 0, count: length)
-                    event.keyboardGetUnicodeString(
-                        maxStringLength: 4,
-                        actualStringLength: &length,
-                        unicodeString: &chars
-                    )
-                    let string = String(utf16CodeUnits: chars, count: length)
-
-                    // Filter out control characters
-                    let filtered = string.filter { $0.isLetter || $0.isNumber || $0.isWhitespace }
-                    if !filtered.isEmpty {
-                        DispatchQueue.main.async {
-                            self.onCharacterTyped?(String(filtered))
-                        }
-
-                        return nil // Consume the event
-                    }
-                }
-            }
+            return nil // Consume the event
         }
 
         return Unmanaged.passUnretained(event)
+    }
+
+    private func handleKeyDown(event: CGEvent) -> Unmanaged<CGEvent>? {
+        let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+        let flags = event.flags
+        let hasCommand = flags.contains(.maskCommand)
+
+        if keyCode == Self.tabKey && hasCommand {
+            return handleCmdTab(hasShift: flags.contains(.maskShift))
+        }
+
+        let switcherShowing = isShowingSwitcher
+
+        if keyCode == Self.escapeKey && switcherShowing {
+            stateLock.lock()
+            tabKeyWasPressed = false
+            _isShowingSwitcher = false
+            stateLock.unlock()
+
+            DispatchQueue.main.async {
+                self.onEscapePressed?()
+            }
+            return nil // Consume the event
+        }
+
+        guard switcherShowing else {
+            return Unmanaged.passUnretained(event)
+        }
+
+        if keyCode == Self.backspaceKey && !hasCommand {
+            DispatchQueue.main.async {
+                self.onBackspacePressed?()
+            }
+            return nil // Consume the event
+        }
+
+        if hasCommand, let windowIndex = Self.numberKeyMap[keyCode] {
+            DispatchQueue.main.async {
+                self.onNumberPressed?(windowIndex)
+            }
+            return nil // Consume the event
+        }
+
+        if !hasCommand, let typed = searchableCharacters(from: event) {
+            DispatchQueue.main.async {
+                self.onCharacterTyped?(typed)
+            }
+            return nil // Consume the event
+        }
+
+        return Unmanaged.passUnretained(event)
+    }
+
+    private func handleCmdTab(hasShift: Bool) -> Unmanaged<CGEvent>? {
+        // Flip the "showing" flag here on the tap thread rather than waiting for the main
+        // queue to run showSwitcher(). A fast Cmd+Tab+Tab would otherwise see a stale `false`
+        // on the second press, route it to onCmdTabPressed, and get swallowed by the
+        // already-showing guard — silently dropping the user's advance.
+        stateLock.lock()
+        tabKeyWasPressed = true
+        let wasShowing = _isShowingSwitcher
+        _isShowingSwitcher = true
+        stateLock.unlock()
+
+        logger.info("Cmd+Tab detected. wasShowing=\(wasShowing), hasShift=\(hasShift)")
+
+        DispatchQueue.main.async {
+            if hasShift {
+                self.onShiftTabPressed?()
+            } else if wasShowing {
+                self.onTabPressed?()
+            } else {
+                self.onCmdTabPressed?()
+            }
+        }
+
+        return nil // Consume the event to prevent default behavior
+    }
+
+    /// Extracts the typed characters usable as a search query, or nil if there are none.
+    private func searchableCharacters(from event: CGEvent) -> String? {
+        var length = 0
+        event.keyboardGetUnicodeString(maxStringLength: 4, actualStringLength: &length, unicodeString: nil)
+
+        guard length > 0 else { return nil }
+
+        var chars = [UniChar](repeating: 0, count: length)
+        event.keyboardGetUnicodeString(
+            maxStringLength: 4,
+            actualStringLength: &length,
+            unicodeString: &chars
+        )
+        let string = String(utf16CodeUnits: chars, count: length)
+
+        // Filter out control characters
+        let filtered = string.filter { $0.isLetter || $0.isNumber || $0.isWhitespace }
+        return filtered.isEmpty ? nil : String(filtered)
     }
 
     deinit {

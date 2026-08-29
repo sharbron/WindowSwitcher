@@ -245,7 +245,7 @@ struct PreferencesView: View {
 
             // Footer
             HStack {
-                Text("Window Switcher v1.0")
+                Text("Window Switcher v\(appVersion)")
                     .font(.caption)
                     .foregroundColor(.secondary)
 
@@ -259,6 +259,11 @@ struct PreferencesView: View {
             .padding()
         }
         .frame(width: 600, height: 650)
+    }
+
+    /// Read from the bundle so the footer cannot drift from the shipped version.
+    private var appVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
     }
 
     private func setLaunchAtLogin(_ enable: Bool) {
@@ -294,7 +299,8 @@ struct PreferencesView: View {
     }
 
     private func openScreenRecordingPreferences() {
-        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") else { return }
+        let urlString = "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+        guard let url = URL(string: urlString) else { return }
         NSWorkspace.shared.open(url)
     }
 
