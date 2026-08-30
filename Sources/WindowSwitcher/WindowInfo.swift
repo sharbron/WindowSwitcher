@@ -236,18 +236,45 @@ class WindowManager: ObservableObject {
         return app
     }
 
-    /// Gets the array of accessibility windows for the given application
-    private func getAccessibilityWindows(for app: NSRunningApplication) -> [AXUIElement]? {
+    /// Gets the array of accessibility windows for the given application.
+    ///
+    /// Internal rather than private so the Finder fallback below can be regression-tested.
+    func getAccessibilityWindows(for app: NSRunningApplication) -> [AXUIElement]? {
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
-        var windowsValue: AnyObject?
 
-        let windowsAttr = kAXWindowsAttribute as CFString
-        guard AXUIElementCopyAttributeValue(appElement, windowsAttr, &windowsValue) == .success,
-              let axWindows = windowsValue as? [AXUIElement] else {
+        if let axWindows = axElements(of: appElement, attribute: kAXWindowsAttribute), !axWindows.isEmpty {
+            return axWindows
+        }
+
+        // Finder reports an EMPTY kAXWindows array even with windows open — the call succeeds,
+        // it just returns nothing. Its windows are reachable only as AXWindow-role children.
+        // Without this fallback no Finder window can ever be matched, so activating one
+        // degrades to raising the app and letting Finder front whichever window it likes, and
+        // close/minimize silently do nothing. The app element's other children are the menu bar
+        // and the desktop's scroll area, which the role filter drops.
+        guard let children = axElements(of: appElement, attribute: kAXChildrenAttribute) else {
             return nil
         }
 
-        return axWindows
+        let windowChildren = children.filter { role(of: $0) == kAXWindowRole }
+        return windowChildren.isEmpty ? nil : windowChildren
+    }
+
+    private func axElements(of element: AXUIElement, attribute: String) -> [AXUIElement]? {
+        var value: AnyObject?
+        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else {
+            return nil
+        }
+        return value as? [AXUIElement]
+    }
+
+    private func role(of element: AXUIElement) -> String? {
+        var value: AnyObject?
+        let roleAttr = kAXRoleAttribute as CFString
+        guard AXUIElementCopyAttributeValue(element, roleAttr, &value) == .success else {
+            return nil
+        }
+        return value as? String
     }
 
     /// Finds the accessibility window element matching the given window info

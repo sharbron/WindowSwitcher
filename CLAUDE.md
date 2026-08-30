@@ -71,6 +71,9 @@ Sources/WindowSwitcher/
    driven by an `NSHostingController` rather than a fixed `contentRect`.
 
 ### Correctness Fixes
+0. ✅ **Finder windows** — activating a Finder window raised whichever one Finder felt like.
+   See "Finder's empty AXWindows" under Known Limitations.
+
 1. ✅ **Window matching by bounds** — `kAXPositionAttribute` returns an opaque `AXValue`, so the
    old `as? CGPoint` cast always failed and bounds matching never once succeeded. Every
    activation silently fell back to exact-title matching, which cannot focus, close, or
@@ -199,9 +202,14 @@ No special entitlements required for unsigned builds. For distribution, add code
 
 1. **Screen Recording Permission**: Required for window previews. Falls back to app icons if denied.
 2. **Window Matching**: Uses bounds (5pt tolerance) then exact title as a fallback. May fail for
-   rapidly resizing windows.
-3. **Protected Windows**: Cannot capture thumbnails of some system windows.
-4. **Performance**: May degrade with >50 windows (configurable limit).
+   rapidly resizing windows, and cannot distinguish two windows that are exactly stacked.
+3. **Finder's empty AXWindows**: Finder returns an empty `kAXWindows` array even with windows
+   open — the call succeeds and simply returns nothing. Its windows are reachable only as
+   `AXWindow`-role children of the app element, so `getAccessibilityWindows` falls back to
+   filtering `AXChildren`. Without it, no Finder window could be activated, closed or minimized
+   by the switcher. Finder is the only app observed to do this; the fallback is generic.
+4. **Protected Windows**: Cannot capture thumbnails of some system windows.
+5. **Performance**: May degrade with >50 windows (configurable limit).
 
 ## Troubleshooting
 

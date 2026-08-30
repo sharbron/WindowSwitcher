@@ -318,3 +318,86 @@ final class ThumbnailCacheTests: XCTestCase {
         XCTAssertNotNil(ThumbnailCache.appIcon(for: window), "A placeholder icon should always be available")
     }
 }
+
+// MARK: - Accessibility Window Discovery
+
+/// Finder returns an empty `kAXWindows` array even when it has windows open, so its windows
+/// have to be recovered from `AXChildren`. Without that, no Finder window can be matched and
+/// activation degrades to raising the app — which fronts whichever window Finder last used,
+/// not the one the user picked.
+///
+/// This is an integration test against the live system: it needs Accessibility permission and
+/// an open Finder window, and skips when either is missing.
+final class AccessibilityWindowDiscoveryTests: XCTestCase {
+
+    private var manager: WindowManager!
+
+    override func setUp() {
+        super.setUp()
+        manager = WindowManager(userDefaults: UserDefaults(suiteName: "AXDiscoveryTests")!)
+    }
+
+    override func tearDown() {
+        UserDefaults.standard.removePersistentDomain(forName: "AXDiscoveryTests")
+        manager = nil
+        super.tearDown()
+    }
+
+    /// Number of normal, switcher-eligible windows CoreGraphics reports for a bundle id.
+    private func onScreenWindowCount(forBundleID bundleID: String) -> Int {
+        guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first else {
+            return 0
+        }
+        let options: CGWindowListOption = [.excludeDesktopElements, .optionOnScreenOnly]
+        guard let list = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
+            return 0
+        }
+        return list.filter { info in
+            (info[kCGWindowOwnerPID as String] as? pid_t) == app.processIdentifier
+                && (info[kCGWindowLayer as String] as? Int) == 0
+        }.count
+    }
+
+    func testFinderWindowsAreDiscoverableDespiteEmptyAXWindowsArray() throws {
+        try XCTSkipUnless(AXIsProcessTrusted(), "Needs Accessibility permission")
+
+        guard let finder = NSRunningApplication
+            .runningApplications(withBundleIdentifier: "com.apple.finder").first else {
+            throw XCTSkip("Finder is not running")
+        }
+
+        let visibleWindows = onScreenWindowCount(forBundleID: "com.apple.finder")
+        try XCTSkipIf(visibleWindows == 0, "No Finder windows open")
+
+        let discovered = manager.getAccessibilityWindows(for: finder)
+
+        XCTAssertNotNil(discovered, "Finder's windows must be discoverable")
+        XCTAssertGreaterThanOrEqual(
+            discovered?.count ?? 0,
+            1,
+            "Finder reports an empty kAXWindows array; windows must be recovered from AXChildren"
+        )
+    }
+
+    func testDiscoveredElementsAreWindows() throws {
+        try XCTSkipUnless(AXIsProcessTrusted(), "Needs Accessibility permission")
+
+        guard let finder = NSRunningApplication
+            .runningApplications(withBundleIdentifier: "com.apple.finder").first else {
+            throw XCTSkip("Finder is not running")
+        }
+        try XCTSkipIf(onScreenWindowCount(forBundleID: "com.apple.finder") == 0, "No Finder windows open")
+        guard let discovered = manager.getAccessibilityWindows(for: finder) else {
+            throw XCTSkip("No accessibility windows returned")
+        }
+
+        // The menu bar and the desktop's scroll area are siblings of the windows in AXChildren
+        // and must not leak through the filter.
+        for element in discovered {
+            var roleValue: AnyObject?
+            let status = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleValue)
+            XCTAssertEqual(status, .success)
+            XCTAssertEqual(roleValue as? String, kAXWindowRole, "Only AXWindow elements should be returned")
+        }
+    }
+}
