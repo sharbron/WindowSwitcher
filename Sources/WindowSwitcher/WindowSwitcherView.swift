@@ -17,6 +17,8 @@ struct WindowSwitcherView: View {
     @AppStorage("useAppIcons") private var useAppIcons: Bool = false
     @State private var hoveredWindowID: CGWindowID?
 
+    private static let cornerRadius: CGFloat = 16
+
     private var thumbnailWidth: CGFloat {
         CGFloat(thumbnailSize)
     }
@@ -54,120 +56,118 @@ struct WindowSwitcherView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Search bar indicator (if searching)
             if !searchQuery.isEmpty {
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundColor(.secondary)
-                    Text(searchQuery)
-                        .font(.body)
-                        .fontWeight(.medium)
-                    Spacer()
-                    Text("\(totalWindowCount) window\(totalWindowCount == 1 ? "" : "s")")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 10)
-                .background(Color.accentColor.opacity(0.15))
-                .cornerRadius(10)
-                .padding(.horizontal, 20)
-                .padding(.top, 16)
+                searchHeader
+                Divider().opacity(0.5)
             }
 
-            // Main window switcher
-            ScrollViewReader { proxy in
-                ScrollView(.horizontal, showsIndicators: true) {
-                    HStack(spacing: 20) {
-                        ForEach(Array(displayWindows.enumerated()), id: \.element.id) { index, window in
-                            WindowThumbnailView(
-                                window: window,
-                                isSelected: index == selectedIndex,
-                                isHovered: hoveredWindowID == window.id,
-                                thumbnailWidth: thumbnailWidth,
-                                thumbnailHeight: thumbnailHeight,
-                                windowNumber: windowNumbers[window.id],
-                                displayNumber: index < 9 ? index + 1 : nil, // Show 1-9 for Cmd+number
-                                showAppIconOverlay: !useAppIcons,
-                                onClose: onCloseWindow != nil ? { onCloseWindow?(window) } : nil,
-                                onMinimize: onMinimizeWindow != nil ? { onMinimizeWindow?(window) } : nil
-                            )
-                            .id(window.id)
-                            .onTapGesture {
-                                onSelect(window)
-                            }
-                            .onHover { hovering in
-                                hoveredWindowID = hovering ? window.id : nil
-                            }
-                        }
-                    }
-                    .padding(32)
-                }
-                .frame(maxWidth: maxSwitcherWidth)
-                .background(
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 20)
-                            .fill(Color(NSColor.controlBackgroundColor).opacity(0.95))
+            windowStrip
 
-                        VisualEffectBlur(material: .menu, blendingMode: .withinWindow, cornerRadius: 20)
-                            .opacity(0.8)
-                    }
-                )
-                .clipShape(RoundedRectangle(cornerRadius: 20))
-                .shadow(color: .black.opacity(0.3), radius: 20, x: 0, y: 10)
-                .onChange(of: selectedIndex) { newIndex in
-                    if newIndex < displayWindows.count {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            proxy.scrollTo(displayWindows[newIndex].id, anchor: .center)
-                        }
-                    }
-                }
-                .onAppear {
-                    if selectedIndex < displayWindows.count {
-                        proxy.scrollTo(displayWindows[selectedIndex].id, anchor: .center)
-                    }
-                }
-            }
-
-            // Window count and navigation hints
             if totalWindowCount > 0 {
-                HStack(spacing: 16) {
-                    // Window count
-                    if displayWindows.count < totalWindowCount {
-                        HStack(spacing: 4) {
-                            Image(systemName: "info.circle")
-                                .font(.caption)
-                            Text("Showing \(displayWindows.count) of \(totalWindowCount) windows")
-                                .font(.caption)
-                        }
-                        .foregroundColor(.secondary)
-                    } else {
-                        Text("\(totalWindowCount) window\(totalWindowCount == 1 ? "" : "s")")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-
-                    Spacer()
-
-                    // Keyboard hints
-                    HStack(spacing: 12) {
-                        KeyHintView(keys: "⌘1-9", description: "Jump")
-                        KeyHintView(keys: "Tab", description: "Next")
-                        if !searchQuery.isEmpty {
-                            KeyHintView(keys: "⌫", description: "Clear")
-                        } else {
-                            KeyHintView(keys: "Type", description: "Search")
-                        }
-                        KeyHintView(keys: "Esc", description: "Cancel")
-                    }
-                    .font(.caption2)
-                }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 12)
-                .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
+                Divider().opacity(0.5)
+                footer
             }
         }
-        .background(Color.clear)
+        .frame(maxWidth: maxSwitcherWidth)
+        // The material, the rounded corners and the shadow belong to the whole panel. They
+        // used to be applied to the scroll view alone, which left the footer hanging below
+        // the card as an unclipped, square-cornered slab.
+        .background(
+            VisualEffectBlur(material: .popover, blendingMode: .behindWindow)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
+        .overlay(
+            // A hairline keeps the panel from dissolving into a light desktop.
+            RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.28), radius: 24, x: 0, y: 12)
+    }
+
+    private var searchHeader: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            Text(searchQuery)
+                .font(.body.weight(.medium))
+            Spacer()
+            Text(windowCountLabel)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+    }
+
+    private var windowStrip: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(Array(displayWindows.enumerated()), id: \.element.id) { index, window in
+                        WindowThumbnailView(
+                            window: window,
+                            isSelected: index == selectedIndex,
+                            isHovered: hoveredWindowID == window.id,
+                            thumbnailWidth: thumbnailWidth,
+                            thumbnailHeight: thumbnailHeight,
+                            windowNumber: windowNumbers[window.id],
+                            displayNumber: index < 9 ? index + 1 : nil, // Show 1-9 for Cmd+number
+                            showAppIconOverlay: !useAppIcons,
+                            onClose: onCloseWindow != nil ? { onCloseWindow?(window) } : nil,
+                            onMinimize: onMinimizeWindow != nil ? { onMinimizeWindow?(window) } : nil
+                        )
+                        .id(window.id)
+                        .onTapGesture { onSelect(window) }
+                        .onHover { hovering in
+                            hoveredWindowID = hovering ? window.id : nil
+                        }
+                    }
+                }
+                .padding(20)
+            }
+            .onChange(of: selectedIndex) { newIndex in
+                if newIndex < displayWindows.count {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        proxy.scrollTo(displayWindows[newIndex].id, anchor: .center)
+                    }
+                }
+            }
+            .onAppear {
+                if selectedIndex < displayWindows.count {
+                    proxy.scrollTo(displayWindows[selectedIndex].id, anchor: .center)
+                }
+            }
+        }
+    }
+
+    private var footer: some View {
+        HStack(spacing: 16) {
+            Text(windowCountLabel)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Spacer()
+
+            HStack(spacing: 14) {
+                KeyHintView(keys: "⌘1-9", description: "Jump")
+                KeyHintView(keys: "Tab", description: "Next")
+                if searchQuery.isEmpty {
+                    KeyHintView(keys: "Type", description: "Search")
+                } else {
+                    KeyHintView(keys: "Delete", description: "Clear")
+                }
+                KeyHintView(keys: "Esc", description: "Cancel")
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
+    }
+
+    private var windowCountLabel: String {
+        if displayWindows.count < totalWindowCount {
+            return "Showing \(displayWindows.count) of \(totalWindowCount) windows"
+        }
+        return "\(totalWindowCount) window\(totalWindowCount == 1 ? "" : "s")"
     }
 
     private var maxSwitcherWidth: CGFloat {
@@ -210,148 +210,134 @@ struct WindowThumbnailView: View {
 
     @AppStorage("showWindowTitles") private var showWindowTitles: Bool = true
 
+    /// Both label lines are always reserved, so a window without a title does not sit at a
+    /// different height from its neighbours and the row stops jumping as you Tab through.
+    private static let labelHeight: CGFloat = 34
+
+    private var secondaryLabel: String? {
+        if !window.title.isEmpty && window.title != window.appName {
+            return window.title
+        }
+        if let number = windowNumber {
+            return "Window \(number)"
+        }
+        return nil
+    }
+
     var body: some View {
-        VStack(spacing: 12) {
-            // Window Thumbnail
-            ZStack {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color(NSColor.controlBackgroundColor))
-                    .frame(width: thumbnailWidth, height: thumbnailHeight)
+        VStack(spacing: 10) {
+            preview
 
-                if let thumbnail = window.thumbnail {
-                    Image(nsImage: thumbnail)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: thumbnailWidth, height: thumbnailHeight)
-                        .cornerRadius(8)
-                } else {
-                    VStack {
-                        Image(systemName: "hourglass")
-                            .font(.system(size: 40))
-                            .foregroundColor(.secondary)
-                        Text("Loading...")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-
-                // App icon overlay in bottom-left corner (only when showing window previews)
-                if showAppIconOverlay, let appIcon = window.appIcon {
-                    VStack {
-                        Spacer()
-                        HStack {
-                            Image(nsImage: appIcon)
-                                .resizable()
-                                .frame(width: 32, height: 32)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .fill(Color(NSColor.windowBackgroundColor).opacity(0.95))
-                                        .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
-                                )
-                                .cornerRadius(6)
-                                .padding(8)
-                            Spacer()
-                        }
-                    }
-                }
-
-                // Display number badge (top-right) for Cmd+1-9
-                if let number = displayNumber {
-                    VStack {
-                        HStack {
-                            Spacer()
-                            Text("\(number)")
-                                .font(.system(size: 18, weight: .bold))
-                                .foregroundColor(.white)
-                                .frame(width: 32, height: 32)
-                                .background(
-                                    Circle()
-                                        .fill(Color.accentColor)
-                                        .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
-                                )
-                                .padding(8)
-                        }
-                        Spacer()
-                    }
-                }
-
-                // Window actions (on hover)
-                if isHovered && (onClose != nil || onMinimize != nil) {
-                    VStack {
-                        HStack(spacing: 8) {
-                            Spacer()
-
-                            if let onMinimize = onMinimize {
-                                Button(
-                                    action: { onMinimize() },
-                                    label: {
-                                        Image(systemName: "minus.circle.fill")
-                                            .font(.system(size: 24))
-                                            .foregroundColor(.orange)
-                                            .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
-                                    }
-                                )
-                                .buttonStyle(.plain)
-                                .help("Minimize Window")
-                            }
-
-                            if let onClose = onClose {
-                                Button(
-                                    action: { onClose() },
-                                    label: {
-                                        Image(systemName: "xmark.circle.fill")
-                                            .font(.system(size: 24))
-                                            .foregroundColor(.red)
-                                            .shadow(color: .black.opacity(0.3), radius: 2, x: 0, y: 1)
-                                    }
-                                )
-                                .buttonStyle(.plain)
-                                .help("Close Window")
-                            }
-                        }
-                        .padding(8)
-                        Spacer()
-                    }
-                    .transition(.opacity)
-                }
-            }
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 3)
-            )
-            .scaleEffect(isHovered && !isSelected ? 1.05 : 1.0)
-            .animation(.easeInOut(duration: 0.15), value: isHovered)
-
-            // App name and window title
             if showWindowTitles {
-                VStack(spacing: 4) {
+                VStack(spacing: 2) {
                     Text(window.appName)
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.system(size: 13, weight: .medium))
                         .lineLimit(1)
 
-                    // Show window title if it exists and is different from app name
-                    if !window.title.isEmpty && window.title != window.appName {
-                        Text(window.title)
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
+                    if let secondaryLabel {
+                        Text(secondaryLabel)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .truncationMode(.middle)
-                    } else if let number = windowNumber {
-                        // Show window number if multiple windows from same app
-                        Text("Window \(number)")
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
                     }
                 }
-                .frame(width: thumbnailWidth)
+                .frame(width: thumbnailWidth, height: Self.labelHeight, alignment: .top)
             }
         }
-        .padding(16)
+        .padding(10)
         .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(isSelected ? Color.accentColor.opacity(0.15) : Color.clear)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(selectionFill)
         )
+        .animation(.easeInOut(duration: 0.15), value: isSelected)
+        .animation(.easeInOut(duration: 0.15), value: isHovered)
+    }
+
+    /// One selection treatment, not two. The old cell drew a 3pt accent border around the
+    /// thumbnail *and* filled the whole cell, which read as much louder than the rest of the UI.
+    private var selectionFill: Color {
+        if isSelected { return Color.accentColor.opacity(0.22) }
+        if isHovered { return Color.primary.opacity(0.08) }
+        return .clear
+    }
+
+    private var preview: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(Color.primary.opacity(0.07))
+
+            if let thumbnail = window.thumbnail {
+                Image(nsImage: thumbnail)
+                    .resizable()
+                    .scaledToFit()
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            } else {
+                Image(systemName: "macwindow")
+                    .font(.system(size: 28))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .frame(width: thumbnailWidth, height: thumbnailHeight)
+        .overlay(alignment: .bottomLeading) {
+            if showAppIconOverlay, let appIcon = window.appIcon {
+                Image(nsImage: appIcon)
+                    .resizable()
+                    .frame(width: 24, height: 24)
+                    .shadow(color: .black.opacity(0.35), radius: 3, x: 0, y: 1)
+                    .padding(6)
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if let number = displayNumber {
+                Text("\(number)")
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .frame(width: 20, height: 20)
+                    .background(Circle().fill(Color.black.opacity(0.55)))
+                    .padding(5)
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            if isHovered && (onClose != nil || onMinimize != nil) {
+                HStack(spacing: 6) {
+                    if let onMinimize {
+                        WindowActionButton(symbol: "minus", help: "Minimize Window", action: onMinimize)
+                    }
+                    if let onClose {
+                        WindowActionButton(symbol: "xmark", help: "Close Window", action: onClose)
+                    }
+                }
+                .padding(5)
+                .transition(.opacity)
+            }
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(
+                    isSelected ? Color.accentColor : Color.primary.opacity(0.12),
+                    lineWidth: isSelected ? 2 : 1
+                )
+        )
+    }
+}
+
+/// A small circular control shown over a preview on hover.
+struct WindowActionButton: View {
+    let symbol: String
+    let help: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 18, height: 18)
+                .background(Circle().fill(Color.black.opacity(0.6)))
+        }
+        .buttonStyle(.plain)
+        .help(help)
     }
 }
 
