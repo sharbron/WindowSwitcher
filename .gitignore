@@ -63,4 +63,3 @@ iOSInjectionProject/
 # Build outputs
 *.app
 *.dmg
-generate_icon.swift
