@@ -61,9 +61,63 @@ fi
 # Clear quarantine attributes to avoid "damaged" warnings
 xattr -cr "$APP_BUNDLE"
 
-# Code sign the app (ad-hoc signature)
-echo "Code signing app..."
-codesign --force --deep --sign - "$APP_BUNDLE"
+# ---------------------------------------------------------------------------
+# Code signing
+# ---------------------------------------------------------------------------
+#
+# A real certificate matters for more than distribution. TCC binds an app's Accessibility
+# grant to its *designated requirement*, and an ad-hoc signature's requirement is literally
+# the content hash:
+#
+#   ad-hoc:  designated => cdhash H"5a568b52..."      (changes every build)
+#   signed:  designated => identifier "com.harbron.WindowSwitcher" and anchor apple generic
+#                          and certificate leaf[subject.CN] = "Apple Development: ..."
+#
+# So an ad-hoc build looks like a brand new app to macOS every single time and silently
+# loses its permission. A signed build keeps it.
+#
+# Override the choice with: SIGN_IDENTITY="Developer ID Application: ..." ./create_app.sh
+detect_signing_identity() {
+    if [ -n "${SIGN_IDENTITY:-}" ]; then
+        printf '%s' "$SIGN_IDENTITY"
+        return
+    fi
+    # Developer ID first (the only one that can be notarized for distribution), then a
+    # development certificate, which is enough to keep permissions on this machine.
+    local available prefix found
+    available=$(security find-identity -v -p codesigning 2>/dev/null || true)
+    for prefix in "Developer ID Application" "Apple Development" "Mac Developer"; do
+        found=$(printf '%s' "$available" | sed -n "s/.*\"\($prefix[^\"]*\)\".*/\1/p" | head -1)
+        if [ -n "$found" ]; then
+            printf '%s' "$found"
+            return
+        fi
+    done
+    printf '%s' "-"
+}
+
+SIGN_ID=$(detect_signing_identity)
+
+if [ "$SIGN_ID" = "-" ]; then
+    echo "⚠️  No signing certificate found — using an ad-hoc signature."
+    echo "   Accessibility permission will need re-granting after every build."
+    codesign --force --sign - "$APP_BUNDLE"
+    SIGNED_PROPERLY=0
+else
+    echo "Code signing as: $SIGN_ID"
+    # Hardened runtime is required for notarization later and costs nothing now.
+    # --timestamp needs the network and is only required for distribution, so it is
+    # limited to Developer ID builds.
+    if [[ "$SIGN_ID" == "Developer ID Application"* ]]; then
+        codesign --force --options runtime --timestamp --sign "$SIGN_ID" "$APP_BUNDLE"
+    else
+        codesign --force --options runtime --sign "$SIGN_ID" "$APP_BUNDLE"
+    fi
+    SIGNED_PROPERLY=1
+fi
+
+# Fail loudly rather than shipping a bundle that will not launch.
+codesign --verify --strict "$APP_BUNDLE"
 
 echo ""
 echo "✅ App bundle created: $APP_BUNDLE"
@@ -143,11 +197,18 @@ if [ "$WAS_RUNNING" = "1" ]; then
     echo ""
 fi
 
-echo "⚠️  Accessibility permission must be re-granted after every build."
-echo "   The ad-hoc signature changes whenever the code does, so macOS treats each"
-echo "   build as a new app and drops its existing grant. Until you re-approve it in"
-echo "   System Settings > Privacy & Security > Accessibility, Cmd+Tab will do nothing."
-echo "   The app's Permissions tab shows the current state."
+if [ "$SIGNED_PROPERLY" = "1" ]; then
+    echo "Signed with a stable identity, so the Accessibility grant survives rebuilds."
+    echo "You only need to approve it once, in System Settings > Privacy & Security >"
+    echo "Accessibility. (Approve it again if you ever switch signing certificate — the"
+    echo "grant is tied to the certificate.)"
+else
+    echo "⚠️  Accessibility permission must be re-granted after every build."
+    echo "   An ad-hoc signature's designated requirement is the code hash, so macOS treats"
+    echo "   each build as a new app and drops its existing grant. Until you re-approve it in"
+    echo "   System Settings > Privacy & Security > Accessibility, Cmd+Tab will do nothing."
+    echo "   The app's Permissions tab shows the current state."
+fi
 echo ""
 echo "To start it automatically, enable \"Launch at login\" in the app's General settings."
 echo ""

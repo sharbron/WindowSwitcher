@@ -194,11 +194,30 @@ swift build -c release
 - warns and leaves the bundle in place if the install directory is not writable — the build
   itself still succeeds.
 
-**Accessibility permission must be re-granted after every build.** The ad-hoc signature
-changes whenever the code does, so macOS sees each build as a new app and drops its existing
-grant. Until it is re-approved, Cmd+Tab does nothing. The app's Permissions tab shows the
-live state. This is inherent to ad-hoc signing; a Developer ID certificate with a stable
-identity would avoid it.
+### Code Signing
+
+`create_app.sh` picks a signing identity automatically, preferring `Developer ID Application`
+(the only kind that can be notarized), then `Apple Development`, and falling back to an ad-hoc
+signature if neither exists. Override with `SIGN_IDENTITY="..." ./create_app.sh`.
+
+This matters for more than distribution. TCC binds an app's Accessibility grant to its
+**designated requirement**, and an ad-hoc signature's requirement *is* the code hash:
+
+```
+ad-hoc:  designated => cdhash H"5a568b52..."        # different every build
+signed:  designated => identifier "com.harbron.WindowSwitcher" and anchor apple generic
+                       and certificate leaf[subject.CN] = "Apple Development: ..."
+```
+
+So an ad-hoc build looks like a brand new app to macOS every time and silently loses its
+permission — Cmd+Tab just stops working. A signed build keeps it: verified by rebuilding after
+a real code change and confirming the CDHash changed while the designated requirement did not.
+
+Signed builds also enable the hardened runtime (`--options runtime`), which notarization
+requires and which the app runs fine under. Developer ID builds additionally get `--timestamp`.
+
+Switching signing certificate changes the requirement, so the permission has to be granted
+once more after such a switch.
 
 ### Build Output
 - **App Bundle**: `WindowSwitcher.app` (~880 KB), also installed to `/Applications`
@@ -296,13 +315,27 @@ log stream --predicate 'subsystem == "com.windowswitcher"' --level debug
 2. Clear quarantine: `xattr -cr WindowSwitcher.app`
 3. Ad-hoc code signature applied automatically
 
-Users must run: `xattr -cr /Applications/WindowSwitcher.app` on first install.
+Users must run: `xattr -cr /Applications/WindowSwitcher.app` on first install. Notarizing
+removes that requirement.
 
 ### Signed Distribution (Future)
-1. Obtain Apple Developer ID certificate ($99/year)
-2. Sign: `codesign --deep --force --sign "Developer ID Application: Name" WindowSwitcher.app`
-3. Notarize: `xcrun notarytool submit WindowSwitcher.zip`
+
+Local builds are already signed with an **Apple Development** certificate, which is enough to
+run on this machine and to keep permissions across rebuilds. Distributing to anyone else needs
+a **Developer ID Application** certificate, which is a different certificate type and is not
+currently installed — create it in the Apple Developer portal (Certificates > Developer ID
+Application) or via Xcode > Settings > Accounts > Manage Certificates, then:
+
+1. `SIGN_IDENTITY="Developer ID Application: ..." ./create_app.sh`
+   (the script adds `--options runtime --timestamp` automatically for Developer ID)
+2. Store notarization credentials once:
+   `xcrun notarytool store-credentials notarytool --apple-id <id> --team-id <team> --password <app-specific-password>`
+3. Notarize: `ditto -c -k --keepParent WindowSwitcher.app WindowSwitcher.zip` then
+   `xcrun notarytool submit WindowSwitcher.zip --keychain-profile notarytool --wait`
 4. Staple: `xcrun stapler staple WindowSwitcher.app`
+
+Without notarization, other users still get a Gatekeeper warning; the `xattr -cr` workaround in
+README/INSTALL is only needed until then.
 
 ## Future Enhancements
 
