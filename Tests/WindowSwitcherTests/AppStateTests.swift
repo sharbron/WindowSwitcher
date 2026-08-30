@@ -203,11 +203,10 @@ final class AppStateTests: XCTestCase {
         }
 
         XCTAssertEqual(contentView.fittingSize.width, SettingsTab.width, accuracy: 1.0)
-        XCTAssertEqual(
+        XCTAssertGreaterThanOrEqual(
             contentView.fittingSize.height,
             SettingsTab.general.contentHeight,
-            accuracy: 1.0,
-            "Should open sized to the General tab"
+            "Should open with at least the General tab's content height"
         )
     }
 

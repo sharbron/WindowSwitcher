@@ -9,6 +9,10 @@ import os.log
 /// Laid out the way macOS settings windows are: a toolbar of tabs over grouped forms, rather
 /// than one long scroll. Each tab is short enough to read without scrolling.
 struct PreferencesView: View {
+    /// The tab strip otherwise sits flush against the title bar with no breathing room.
+    /// Added to the frame height as well, so tabs keep their full content area.
+    private static let tabStripTopPadding: CGFloat = 12
+
     @State private var selection: SettingsTab = .general
 
     var body: some View {
@@ -29,8 +33,12 @@ struct PreferencesView: View {
                 .tabItem { Label("Permissions", systemImage: "lock.shield") }
                 .tag(SettingsTab.permissions)
         }
+        .padding(.top, Self.tabStripTopPadding)
         // The window follows this, so it grows and shrinks per tab like macOS settings do.
-        .frame(width: SettingsTab.width, height: selection.contentHeight)
+        .frame(
+            width: SettingsTab.width,
+            height: selection.contentHeight + Self.tabStripTopPadding
+        )
     }
 }
 
