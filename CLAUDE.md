@@ -162,8 +162,14 @@ Sources/WindowSwitcher/
 ### Build Commands
 
 ```bash
-# Using build script (recommended)
+# Build, bundle, and install to /Applications (recommended)
 ./create_app.sh
+
+# Build and bundle without installing
+./create_app.sh --no-install     # or: SKIP_INSTALL=1 ./create_app.sh
+
+# Install somewhere other than /Applications
+INSTALL_DIR=~/Applications ./create_app.sh
 
 # Manual build
 swift build -c release
@@ -172,8 +178,30 @@ swift build -c release
 ./create_dmg.sh
 ```
 
+### Install Step
+
+`create_app.sh` installs to `/Applications` as part of a normal build. It:
+
+- quits any running copy first (a running bundle cannot be replaced safely, and the old
+  process would otherwise keep running the old code), and relaunches it afterwards if it
+  was running;
+- stages the copy next to the target and swaps it in, so a failed copy cannot leave a
+  half-written app where the working one used to be;
+- uses `ditto` rather than `cp -r`, which preserves the bundle's extended attributes and
+  code signature;
+- refuses to replace an existing `WindowSwitcher.app` whose bundle identifier is not ours,
+  rather than clobbering a name collision;
+- warns and leaves the bundle in place if the install directory is not writable — the build
+  itself still succeeds.
+
+**Accessibility permission must be re-granted after every build.** The ad-hoc signature
+changes whenever the code does, so macOS sees each build as a new app and drops its existing
+grant. Until it is re-approved, Cmd+Tab does nothing. The app's Permissions tab shows the
+live state. This is inherent to ad-hoc signing; a Developer ID certificate with a stable
+identity would avoid it.
+
 ### Build Output
-- **App Bundle**: `WindowSwitcher.app` (~519 KB)
+- **App Bundle**: `WindowSwitcher.app` (~880 KB), also installed to `/Applications`
 - **DMG**: `WindowSwitcher-1.0.dmg` (for distribution)
 
 ## Configuration
